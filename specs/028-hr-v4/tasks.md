@@ -25,6 +25,11 @@ Story order: US1 → US6 → US5 → US2 (MVP) → US4 → US3 → US7 → US8. 
 > Cross-module branches: signing `028-module-api`, auth `028-hr`, notification
 > `028-hr-mail`, scheduler `028-hr`, go-tangra `028-hr` (stack), go-tangra-docker
 > `028-hr` (from `v4`).
+> T042 uses 261 one-day requests × 4 concurrent approvals (1,044) against one
+> 100-day allowance (one person can hold at most 261 weekday requests a year).
+> T053: an empty cursor starts at the tail; a cursor whose entry was trimmed
+> resumes at the oldest remaining entry (nothing re-applied — outcomes are
+> idempotent per submission); missed outcomes are repaired by reconcile.
 
 ## Phase 1: Setup
 
@@ -100,7 +105,7 @@ Story order: US1 → US6 → US5 → US2 (MVP) → US4 → US3 → US7 → US8. 
 - [x] T039 [P] [US2] `internal/requests/review_test.go` — approve/reject/revoke/cancel/update/delete transitions (FR-016, FR-017), self_review, not_routed, hr:manage override, optimistic version, charges and exact refunds, two-year split.
 - [x] T040 [P] [US2] `internal/requests/list_test.go` — views mine/review/all, filters, paging, detail visibility (SR-004), managers over sub-departments.
 - [x] T041 [P] [US2] `internal/outbox/outbox_test.go` — enqueue in tx, worker batch/backoff/≤ 5 attempts, recipients via Contacts, missing e-mail skipped + audited, never blocks requests; templates keys/vars match contracts.
-- [ ] T042 [P] [US2] `tests/integration/concurrency_test.go` (`//go:build integration`) — 1,000 concurrent approvals against one allowance never overdraw (SC-005); overlap exclusion under concurrency.
+- [x] T042 [P] [US2] `tests/integration/concurrency_test.go` (`//go:build integration`) — 1,000 concurrent approvals against one allowance never overdraw (SC-005); overlap exclusion under concurrency.
 
 ### Implementation
 - [x] T043 [US2] `internal/charges/tx.go` (lock allowances by id, write charges), `internal/requests/{create,review,list}.go`, handlers.
@@ -124,7 +129,7 @@ Story order: US1 → US6 → US5 → US2 (MVP) → US4 → US3 → US7 → US8. 
 - [x] T050 [P] [US3] `internal/signing/start_test.go` (fake signingclient) — approve → awaiting_signing + CreateAndSend (employee then approver, prefill, source_ref, idempotency key per attempt), failure keeps pending and reports reason, template invalid/signer inactive refused; cancel/reject → Cancel; delete → Delete; revoke keeps the document; download streams only for allowed viewers.
 - [x] T051 [P] [US3] `internal/consumer/decode_test.go` + `decode_fuzz_test.go` — only `signing.submission.*`, data ≤ 4 KiB, single object, bounded ids, unknown types skipped.
 - [x] T052 [P] [US3] `internal/signing/outcome_test.go` — completed → approved + charge once (overdraw allowed + `hr.allowance_overdrawn`), declined/cancelled/expired → pending with note + `hr.signing_failed`, request not awaiting / unknown / other tenant ignored and recorded, duplicate outcome no-op, cursor advanced in the same tx.
-- [ ] T053 [P] [US3] `tests/integration/consumer_test.go` — restart replay from persisted cursor; trimmed cursor falls back to tail; reconcile task repairs a missed completion and a missed decline; exactly one charge overall (SC-002, SC-003).
+- [x] T053 [P] [US3] `tests/integration/consumer_test.go` — restart replay from persisted cursor; trimmed cursor falls back to tail; reconcile task repairs a missed completion and a missed decline; exactly one charge overall (SC-002, SC-003).
 
 ### Implementation
 - [x] T054 [US3] `internal/signingmap/`, `internal/signing/{client,start,outcome,download}.go`; absence type signing settings save/validate; `GET /signing/templates`, `/absence-types/{id}/signing-check`, `/requests/{id}/signed-document` (streamed).
@@ -145,11 +150,11 @@ Story order: US1 → US6 → US5 → US2 (MVP) → US4 → US3 → US7 → US8. 
 
 ## Phase 12: Polish & cross-cutting
 
-- [ ] T063 [P] Leak test `tests/integration/leak_test.go` — full flow with known reasons/notes/names; assert none in logs, audit, events (stream) or backups metadata (SC-008).
-- [ ] T064 [P] Isolation suite `tests/integration/isolation_test.go` — tenant B against every tenant-A route → 404 (SC-004); employee against colleagues' details → 404.
+- [x] T063 [P] Leak test `tests/integration/leak_test.go` — full flow with known reasons/notes/names; assert none in logs, audit, events (stream) or backups metadata (SC-008).
+- [x] T064 [P] Isolation suite `tests/integration/isolation_test.go` — tenant B against every tenant-A route → 404 (SC-004); employee against colleagues' details → 404.
 - [x] T065 [P] UI polish — icons in the kit safelist (unit test), dark theme check, a11y e2e (`ui/tests/e2e/a11y.spec.ts`) for all routes, empty/error states.
 - [x] T066 [P] `README.md`, `SECURITY.md` (threat model of spec SR, signing API trust, durability design), `deploy/README.md`.
-- [ ] T067 `make lint vuln cover` green (≥ 80 %, 100 % security packages); `govulncheck` clean; signing repo green too; quickstart automated section passes.
+- [x] T067 `make lint vuln cover` green (≥ 80 %, 100 % security packages); `govulncheck` clean; signing repo green too; quickstart automated section passes.
 - [x] T068 go-tangra-docker (branch `v4`): `docker-compose.yaml.example` (hr, hr-token, volume, Valkey user, gateway allow), production overlay, `configs/hr.yaml`, `policies/hr.yaml` + consumer policy updates (signing, auth, notification, scheduler), `init-db.sql`, `.env.example` (`HR_IMAGE`, `HR_DB_PASSWORD`), `scripts/prod-init.sh` (SERVICES), scheduler discovery, PRODUCTION/README sections.
 
 ## Phase 13: Release **(release)**
