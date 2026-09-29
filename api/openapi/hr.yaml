@@ -562,8 +562,8 @@ paths:
   /api/hr/v1/allowances:
     get:
       operationId: listAllowances
-      x-freya-permission: 'hr:request'
-      description: hr:read lists everyone; managers their departments; others their own.
+      x-freya-permission: 'hr:calendar'
+      description: hr:read lists everyone; managers their departments; others (hr:request) their own.
       parameters:
         - { $ref: '#/components/parameters/page' }
         - { $ref: '#/components/parameters/pageSize' }
@@ -585,7 +585,7 @@ paths:
   /api/hr/v1/allowances/{id}:
     get:
       operationId: getAllowance
-      x-freya-permission: 'hr:request'
+      x-freya-permission: 'hr:calendar'
       parameters: [{ $ref: '#/components/parameters/id' }]
       responses:
         '200': { description: allowance, content: { application/json: { schema: { $ref: '#/components/schemas/Allowance' } } } }
@@ -608,7 +608,7 @@ paths:
   /api/hr/v1/balance/{user_id}:
     get:
       operationId: getBalance
-      x-freya-permission: 'hr:request'
+      x-freya-permission: 'hr:calendar'
       parameters: [{ $ref: '#/components/parameters/userId' }, { $ref: '#/components/parameters/year' }]
       responses:
         '200': { description: balance, content: { application/json: { schema: { $ref: '#/components/schemas/Balance' } } } }
@@ -634,7 +634,7 @@ paths:
   /api/hr/v1/requests:
     get:
       operationId: listRequests
-      x-freya-permission: 'hr:request'
+      x-freya-permission: 'hr:calendar'
       parameters:
         - { $ref: '#/components/parameters/page' }
         - { $ref: '#/components/parameters/pageSize' }

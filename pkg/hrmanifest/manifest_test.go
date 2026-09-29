@@ -82,6 +82,8 @@ func TestCalendarRoutesAreRelationChecked(t *testing.T) {
 		"GET /api/hr/v1/me": true, "GET /api/hr/v1/people": true, "GET /api/hr/v1/calendar": true, "GET /api/hr/v1/absence-types": true,
 		"GET /api/hr/v1/absence-types/{id}": true, "GET /api/hr/v1/departments": true, "GET /api/hr/v1/holidays": true,
 		"GET /api/hr/v1/stream": true, "GET /api/hr/v1/requests/{id}": true, "GET /api/hr/v1/requests/{id}/signed-document": true,
+		"GET /api/hr/v1/allowances": true, "GET /api/hr/v1/allowances/{id}": true, "GET /api/hr/v1/balance/{user_id}": true,
+		"GET /api/hr/v1/requests": true,
 		"POST /api/hr/v1/requests/{id}/approve": true, "POST /api/hr/v1/requests/{id}/reject": true, "POST /api/hr/v1/requests/{id}/revoke": true,
 	}
 	for _, r := range m.Routes {
