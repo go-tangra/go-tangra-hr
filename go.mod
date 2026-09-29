@@ -7,6 +7,7 @@ toolchain go1.26.8
 require (
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-tangra/go-tangra-auth/sdk/v4 v4.2.0
+	github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0
 	github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0
 	github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0
 	github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0
@@ -20,6 +21,7 @@ require (
 )
 
 require (
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-kratos/kratos/v3 v3.0.0 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
@@ -96,7 +98,7 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
+	google.golang.org/protobuf v1.36.12
 )
 
 replace github.com/go-tangra/go-tangra-signing/sdk/v4 => ../go-tangra-signing-v4/sdk
