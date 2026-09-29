@@ -59,7 +59,7 @@ end (SC-006; one query per range + names cached); carry-over 500 people < 30 s
 (SC-007); approval incl. submission creation < 3 s; outcome applied < 1 min after the
 event (SC-003).
 
-**Constraints**: RLS on every row except `hr_tenants`; no reasons, notes, names or
+**Constraints**: RLS on every row (workers use the system scope); no reasons, notes, names or
 e-mail addresses in logs, events or audit (SR-007); days in tenths (no floats);
 request span ≤ 366 days; calendar range ≤ 93 days; holiday import ≤ 64 KiB/500
 lines; backup ≤ 256 MiB; ≤ 10 department levels.
@@ -180,6 +180,6 @@ last on the branch, dropped at release (as 026/027).
 |------|------------|--------------------------------------|
 | New signing SDK module + gRPC service | HR must create/cancel/delete submissions and fetch PDFs without a user token (reconciliation, deletion, member sync) | browser API via gateway needs a user token and signing permissions for approvers; see D1 |
 | Persisted stream cursor + reconciliation task | an approval must never be lost (US3-3) | existing consumers drop events during downtime by design (F6) |
-| `hr_tenants` without RLS | platform-scoped loops need the tenant list; runtime role is NOBYPASSRLS | a BYPASSRLS role widens the blast radius (D4) |
+| System-scoped worker transactions | platform-scoped loops need the tenant list; runtime role is NOBYPASSRLS | a BYPASSRLS role widens the blast radius (D4) |
 | Mail outbox + worker | e-mails must survive restarts and never block a request | goroutines (v3) lose mail; scheduler is not a queue (D8) |
 | Charges table | two-year requests and exact refunds | a single allowance id (v3) cannot express split charges (D7) |

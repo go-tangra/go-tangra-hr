@@ -83,18 +83,22 @@ check on every decision.
 **Alternatives**: compute on read only — expensive list queries over the tree; stored
 only — stale after reorganisations.
 
-## D4. Tenant registry without RLS for platform-scoped work
+## D4. Tenant registry read under the system scope
 
-**Decision**: `hr_tenants` (ids, stream cursor, sync time) is the only table without
-RLS. The consumer, reconciliation and member sync iterate it and then open
-tenant-scoped transactions (`SET app.tenant_id`). A row is inserted (`ON CONFLICT DO
-NOTHING`) by the first write in a tenant.
+**Decision**: `hr_tenants` (ids, stream cursor, sync time) lists the tenants using HR.
+Like every hr table it is under RLS; the consumer, reconciliation and member sync read
+it under the system scope (`app.system = 'on'`, the pattern signing's workers use,
+go-tangra-signing-v4/internal/store/store.go `Scope.System`) and then open
+tenant-scoped transactions per tenant. A row is inserted (`ON CONFLICT DO NOTHING`)
+by the first write in a tenant.
 
 **Rationale**: the runtime role is NOBYPASSRLS (F12); config-listed tenants (as dns,
-F6) do not scale to every tenant using HR.
+F6) do not scale to every tenant using HR; the system scope is only set by trusted
+worker code paths.
 
-**Alternatives**: a BYPASSRLS maintenance role — larger blast radius; tenants from
-auth — HR only cares about tenants that use it.
+**Alternatives**: a table without RLS — an exception to the platform rule; a
+BYPASSRLS maintenance role — larger blast radius; tenants from auth — HR only cares
+about tenants that use it.
 
 ## D5. Members: auth for identity, HR for departments, periodic sync for leavers
 

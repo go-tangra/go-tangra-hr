@@ -4,7 +4,8 @@
 
 Database `hr` (TimescaleDB/PostgreSQL), role `hr_app` LOGIN NOBYPASSRLS. Every table
 has `tenant_id uuid NOT NULL` and a row-level security policy
-`tenant_id = current_setting('app.tenant_id')::uuid` (as signing, `0003_rls.sql`).
+`tenant_id = current_setting('app.tenant_id')::uuid OR current_setting('app.system') = 'on'`
+(as signing, `0003_rls.sql`).
 IDs are UUIDv7 (`store.NewID`). User IDs are auth user IDs (`text`). Days are
 `numeric(6,1)` (half days); money-like float arithmetic is never used for balances.
 Timestamps `timestamptz`; leave dates are calendar `date`s (no time zone).
@@ -178,7 +179,7 @@ Unique `(tenant_id, date)`.
 
 The primary key makes every outcome apply at most once (SR-005).
 
-## hr_tenants (no RLS — ids only)
+## hr_tenants
 
 | column | type | rules |
 |---|---|---|
@@ -187,9 +188,9 @@ The primary key makes every outcome apply at most once (SR-005).
 | cursor_at | timestamptz | |
 | members_synced_at | timestamptz NULL | last member sync (FR-044) |
 
-The only table without row-level security: platform-scoped work (event consumer,
-signing reconciliation, member sync) needs the list of tenants, and the runtime role
-cannot read across tenants of RLS tables (research D4). It holds IDs and cursors only.
+Read under the system scope (`app.system = 'on'`, as signing's workers) by the
+platform-scoped work (event consumer, signing reconciliation, member sync), which
+then opens tenant-scoped transactions per tenant (research D4).
 The cursor is advanced in the same transaction as the outcome it records
 (at-least-once delivery + idempotent apply = exactly-once effect).
 
