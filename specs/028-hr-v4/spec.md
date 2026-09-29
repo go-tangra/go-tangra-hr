@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-29
 
-**Status**: Draft (spec, 2026-09-29)
+**Status**: Planned (plan + 72 tasks, 2026-09-29)
 
 **Spans**: new v4 hr module (API + UI remote), go-tangra-signing-v4 (mesh API for other modules, HR as a submission source), go-tangra-notification-v4 (hr e-mails), go-tangra-scheduler-v4 (hr task types), go-tangra-auth (hr permissions and module roles), go-tangra-portal-v4 (UI remote, gateway route), go-tangra-docker (stack, database, mesh policies)
 
