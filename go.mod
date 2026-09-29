@@ -7,6 +7,7 @@ toolchain go1.26.8
 require (
 	github.com/go-tangra/go-tangra-auth/sdk/v4 v4.2.0
 	github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0
+	github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0
 	github.com/go-tangra/go-tangra/v4 v4.2.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0

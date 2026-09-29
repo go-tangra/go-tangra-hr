@@ -47,6 +47,8 @@ github.com/go-tangra/go-tangra-auth/sdk/v4 v4.2.0 h1:0b8Ph9Eg2GbejNuAiYTZqZeO4uc
 github.com/go-tangra/go-tangra-auth/sdk/v4 v4.2.0/go.mod h1:kzKB/d8rnaEIYH2ZS5kQWAXXz8zdhfndytNs/dvQfOM=
 github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0 h1:/3FczTz9n8Pq1vcOU6rWuXcyvixIaXV/TSsBpciKIi0=
 github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0/go.mod h1:y729N1SBDGRzRjuRW7Te6BTfg1J7e/XDEutrEQ5DxBU=
+github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0 h1:bbBnhjuw+6iJgSwc+4+DooLu0ES1XNTSLBpaYyav+us=
+github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0/go.mod h1:9rdsSKJ8nNRf6OrrtzSVoVmPIfaRrjTWge0OKe5ne3U=
 github.com/go-tangra/go-tangra/v4 v4.2.3 h1:VNLOK3hYCkWA7p1bpRwQ/WE28v+ky0hbDst5K85rsQU=
 github.com/go-tangra/go-tangra/v4 v4.2.3/go.mod h1:NzD0r1e1eIeLofboJfKAGrKtBKfIa7LlUxaLXOtyvVo=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
