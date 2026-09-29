@@ -117,13 +117,6 @@ func (r resp) json(t *testing.T) map[string]any {
 	return m
 }
 
-func (r resp) reason() string {
-	var m map[string]any
-	_ = json.Unmarshal(r.Body.Bytes(), &m)
-	s, _ := m["reason"].(string)
-	return s
-}
-
 func call(s *Server, method, path, token string, body io.Reader, contentType string) resp {
 	r := httptest.NewRequest(method, "https://localhost"+path, body)
 	if token != "" {
