@@ -1,34 +1,10 @@
-# Binaries
-bin/
-/server
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test coverage
+ui/node_modules/
+ui/dist/
+ui/test-results/
+ui/playwright-report/
+ui/.mf/
+.artifacts/
 coverage.out
-coverage.html
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Claude Code
-CLAUDE.md
-
-# Frontend build artifacts
-frontend/node_modules/
-frontend/dist/
-frontend/.__mf__temp/
-
-# Embedded frontend build artifacts (populated by CI/Docker build)
-cmd/server/assets/frontend-dist/*
-!cmd/server/assets/frontend-dist/.gitkeep
+coverage-*.out
+bin/
+/hrsvc

@@ -1,6 +1,0 @@
-openapi: 3.0.3
-info:
-  title: HR Service API
-  description: Human Resources / Vacation Planning Service
-  version: 1.0.0
-paths: {}

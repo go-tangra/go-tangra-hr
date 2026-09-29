@@ -1,0 +1,859 @@
+openapi: 3.1.0
+info:
+  title: HR API
+  version: 1.0.0
+  description: >
+    Leave management module of the go-tangra v4 platform (feature 028):
+    absence types, allowance pools, yearly allowances with carry-over, leave
+    requests with routed approval (department managers), a signed leave
+    document through the signing module, the team calendar, public holidays,
+    departments and backup. Gateway-proxied under /api/hr. Every route
+    declares an x-freya-permission (or x-freya-public); mutating routes carry
+    the platform CSRF header. The module additionally checks ownership, the
+    approval routing and manager relations; foreign or unauthorised ids answer
+    404 not_found. Days are numbers in half-day steps.
+servers:
+  - url: /
+components:
+  parameters:
+    csrf:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128 }
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    userId:
+      name: user_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100000 }
+    pageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500 }
+    year:
+      name: year
+      in: query
+      schema: { type: integer, minimum: 2000, maximum: 2099 }
+  schemas:
+    Error:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: >
+            unauthenticated | forbidden | not_found | malformed_body | body_too_large |
+            validation | overlap | insufficient_allowance | no_allowance | zero_days |
+            invalid_transition | self_review | not_routed | in_use | duplicate | not_empty |
+            cycle | signing_unavailable | signing_template_invalid | signer_inactive |
+            not_signed | conflict | payload_too_large | invalid_backup | temporarily_unavailable
+        field: { type: string }
+        detail: { type: object }
+    Uuid: { type: string, format: uuid }
+    Date: { type: string, format: date }
+    Days: { type: number, minimum: -3650, maximum: 3650, multipleOf: 0.1 }
+    Color: { type: string, pattern: '^(#[0-9a-fA-F]{6})?$' }
+    Me:
+      type: object
+      required: [user_id, permissions, manages]
+      properties:
+        user_id: { type: string }
+        permissions: { type: array, items: { type: string } }
+        manages: { type: array, items: { type: string }, description: 'department ids the caller manages (with descendants)' }
+        department_id: { type: string }
+    Person:
+      type: object
+      required: [user_id, name]
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        department_id: { type: string }
+    PersonList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Person' } }
+    SigningSettings:
+      type: object
+      additionalProperties: false
+      required: [template_id, employee_party, approver_party, fields]
+      properties:
+        template_id: { type: string, minLength: 1, maxLength: 64 }
+        template_name: { type: string }
+        employee_party: { type: string, minLength: 1, maxLength: 64 }
+        approver_party: { type: string, minLength: 1, maxLength: 64 }
+        fields:
+          type: object
+          maxProperties: 50
+          additionalProperties: { type: string, enum: [employee_name, department, absence_type, start_date, end_date, days, reason, approver_name, today] }
+    AbsenceType:
+      type: object
+      required: [id, name, active, deducts, requires_approval, requires_signing]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+        icon: { type: string }
+        sort_order: { type: integer }
+        active: { type: boolean }
+        metadata: { type: object }
+        deducts: { type: boolean }
+        requires_approval: { type: boolean }
+        pool_id: { type: string }
+        carry_over_cap: { type: [number, 'null'] }
+        requires_signing: { type: boolean }
+        signing: { oneOf: [{ $ref: '#/components/schemas/SigningSettings' }, { type: 'null' }] }
+    AbsenceTypeWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 2000 }
+        color: { $ref: '#/components/schemas/Color' }
+        icon: { type: string, maxLength: 64 }
+        sort_order: { type: integer, minimum: 0, maximum: 10000 }
+        active: { type: boolean }
+        metadata: { type: object }
+        deducts: { type: boolean }
+        requires_approval: { type: boolean }
+        pool_id: { type: string, maxLength: 36 }
+        carry_over_cap: { type: [number, 'null'], minimum: 0, maximum: 365 }
+        requires_signing: { type: boolean }
+        signing: { oneOf: [{ $ref: '#/components/schemas/SigningSettings' }, { type: 'null' }] }
+    AbsenceTypeList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AbsenceType' } }
+    SigningCheck:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        reason: { type: string }
+    SigningTemplate:
+      type: object
+      required: [id, name, parties, fields]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        parties: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } }
+        fields:
+          type: array
+          items:
+            type: object
+            required: [id, name, type, party, text_valued]
+            properties: { id: { type: string }, name: { type: string }, type: { type: string }, party: { type: string }, text_valued: { type: boolean } }
+    SigningTemplateList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SigningTemplate' } }
+    Pool:
+      type: object
+      required: [id, name]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+        icon: { type: string }
+        carry_over_cap: { type: [number, 'null'] }
+    PoolWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 2000 }
+        color: { $ref: '#/components/schemas/Color' }
+        icon: { type: string, maxLength: 64 }
+        carry_over_cap: { type: [number, 'null'], minimum: 0, maximum: 365 }
+    PoolList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Pool' } }
+    Allowance:
+      type: object
+      required: [id, user_id, year, total_days, carried_over, used_days, remaining]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        user_id: { type: string }
+        year: { type: integer }
+        absence_type_id: { type: string }
+        pool_id: { type: string }
+        total_days: { $ref: '#/components/schemas/Days' }
+        carried_over: { $ref: '#/components/schemas/Days' }
+        used_days: { $ref: '#/components/schemas/Days' }
+        remaining: { $ref: '#/components/schemas/Days' }
+        notes: { type: string }
+    AllowanceWrite:
+      type: object
+      additionalProperties: false
+      required: [user_id, year, total_days]
+      properties:
+        user_id: { type: string, minLength: 1, maxLength: 128 }
+        year: { type: integer, minimum: 2000, maximum: 2099 }
+        absence_type_id: { type: string, maxLength: 36 }
+        pool_id: { type: string, maxLength: 36 }
+        total_days: { type: number, minimum: 0, maximum: 365 }
+        carried_over: { type: number, minimum: 0, maximum: 365 }
+        notes: { type: string, maxLength: 2000 }
+    AllowancePage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Allowance' } }
+        total: { type: integer }
+    BalanceLine:
+      type: object
+      required: [kind, id, name, total, carried, used, pending, remaining, member_type_ids]
+      properties:
+        kind: { type: string, enum: [pool, type] }
+        id: { type: string }
+        name: { type: string }
+        color: { type: string }
+        allowance_id: { type: string }
+        total: { $ref: '#/components/schemas/Days' }
+        carried: { $ref: '#/components/schemas/Days' }
+        used: { $ref: '#/components/schemas/Days' }
+        pending: { $ref: '#/components/schemas/Days' }
+        remaining: { $ref: '#/components/schemas/Days' }
+        member_type_ids: { type: array, items: { type: string } }
+    Balance:
+      type: object
+      required: [user_id, year, lines]
+      properties:
+        user_id: { type: string }
+        year: { type: integer }
+        lines: { type: array, items: { $ref: '#/components/schemas/BalanceLine' } }
+    Request:
+      type: object
+      required: [id, user_id, absence_type_id, start_date, end_date, half_start, half_end, days, status, approver_ids]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        user_id: { type: string }
+        user_name: { type: string }
+        absence_type_id: { type: string }
+        start_date: { $ref: '#/components/schemas/Date' }
+        end_date: { $ref: '#/components/schemas/Date' }
+        half_start: { type: boolean }
+        half_end: { type: boolean }
+        days: { $ref: '#/components/schemas/Days' }
+        status: { type: string, enum: [pending, awaiting_signing, approved, rejected, cancelled, revoked] }
+        reason: { type: string }
+        notes: { type: string }
+        approver_ids: { type: array, items: { type: string } }
+        approver_names: { type: array, items: { type: string } }
+        reviewed_by: { type: string }
+        reviewer_name: { type: string }
+        reviewed_at: { type: [string, 'null'], format: date-time }
+        review_notes: { type: string }
+        signing: { type: boolean, description: 'a signed leave document exists or is being signed' }
+        signing_note: { type: string, enum: ['', declined, expired, cancelled] }
+        created_at: { type: string, format: date-time }
+        can_review: { type: boolean }
+        can_edit: { type: boolean }
+        can_cancel: { type: boolean }
+    RequestWrite:
+      type: object
+      additionalProperties: false
+      required: [absence_type_id, start_date, end_date]
+      properties:
+        user_id: { type: string, maxLength: 128 }
+        absence_type_id: { type: string, minLength: 1, maxLength: 36 }
+        start_date: { $ref: '#/components/schemas/Date' }
+        end_date: { $ref: '#/components/schemas/Date' }
+        half_start: { type: boolean }
+        half_end: { type: boolean }
+        reason: { type: string, maxLength: 1000 }
+        notes: { type: string, maxLength: 2000 }
+    RequestEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 1000 }
+        notes: { type: string, maxLength: 2000 }
+    Decision:
+      type: object
+      additionalProperties: false
+      properties:
+        notes: { type: string, maxLength: 1000 }
+    Preview:
+      type: object
+      required: [days, per_year, approvers, overlaps, remaining, status]
+      properties:
+        days: { $ref: '#/components/schemas/Days' }
+        per_year: { type: object, additionalProperties: { type: number } }
+        approvers: { type: array, items: { type: string } }
+        approver_names: { type: array, items: { type: string } }
+        overlaps: { type: boolean }
+        remaining: { type: object, additionalProperties: { type: number } }
+        status: { type: string }
+    RequestPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Request' } }
+        total: { type: integer }
+    Calendar:
+      type: object
+      required: [people, events, holidays]
+      properties:
+        people: { type: array, items: { $ref: '#/components/schemas/Person' } }
+        events:
+          type: array
+          items:
+            type: object
+            required: [id, user_id, absence_type_id, start_date, end_date, half_start, half_end, days, status]
+            properties:
+              id: { type: string }
+              user_id: { type: string }
+              absence_type_id: { type: string }
+              start_date: { $ref: '#/components/schemas/Date' }
+              end_date: { $ref: '#/components/schemas/Date' }
+              half_start: { type: boolean }
+              half_end: { type: boolean }
+              days: { $ref: '#/components/schemas/Days' }
+              status: { type: string }
+        holidays:
+          type: array
+          items: { type: object, required: [date, name], properties: { date: { $ref: '#/components/schemas/Date' }, name: { type: string } } }
+    Department:
+      type: object
+      required: [id, name, parent_id, manager_id]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        parent_id: { type: string }
+        manager_id: { type: string }
+        manager_name: { type: string }
+        member_ids: { type: array, items: { type: string } }
+    DepartmentWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        parent_id: { type: string, maxLength: 36 }
+        manager_id: { type: string, maxLength: 128 }
+    DepartmentList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Department' } }
+    MembersWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        add: { type: array, maxItems: 1000, items: { type: string, maxLength: 128 } }
+        remove: { type: array, maxItems: 1000, items: { type: string, maxLength: 128 } }
+    Holiday:
+      type: object
+      required: [id, date, name, recurring]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        date: { $ref: '#/components/schemas/Date' }
+        name: { type: string }
+        recurring: { type: boolean }
+    HolidayWrite:
+      type: object
+      additionalProperties: false
+      required: [date, name]
+      properties:
+        date: { $ref: '#/components/schemas/Date' }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        recurring: { type: boolean }
+    HolidayList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Holiday' } }
+    ImportResult:
+      type: object
+      required: [created, skipped, errors, dry_run]
+      properties:
+        created: { type: integer }
+        skipped: { type: integer }
+        dry_run: { type: boolean }
+        errors: { type: array, items: { type: object, properties: { line: { type: integer }, reason: { type: string } } } }
+    CarryOverRequest:
+      type: object
+      additionalProperties: false
+      required: [source_year]
+      properties:
+        source_year: { type: integer, minimum: 2000, maximum: 2098 }
+    CarryOverPlan:
+      type: object
+      required: [source_year, items, created, updated]
+      properties:
+        source_year: { type: integer }
+        run_id: { type: string }
+        created: { type: integer }
+        updated: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string }
+              kind: { type: string }
+              id: { type: string }
+              unused: { type: number }
+              cap: { type: [number, 'null'] }
+              carried: { type: number }
+              action: { type: string, enum: [create, update, none] }
+    Stats:
+      type: object
+      required: [absence_types, pending, awaiting_signing, approved, rejected, absent_today]
+      properties:
+        absence_types: { type: integer }
+        pending: { type: integer }
+        awaiting_signing: { type: integer }
+        approved: { type: integer }
+        rejected: { type: integer }
+        absent_today: { type: array, items: { $ref: '#/components/schemas/Person' } }
+  responses:
+    Error:
+      description: refusal
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+paths:
+  /api/hr/v1/health:
+    get:
+      operationId: health
+      x-freya-public: true
+      responses:
+        '200': { description: 'component status', content: { application/json: { schema: { type: object } } } }
+  /api/hr/v1/me:
+    get:
+      operationId: me
+      x-freya-permission: 'hr:calendar'
+      responses:
+        '200': { description: 'the caller', content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/people:
+    get:
+      operationId: listPeople
+      x-freya-permission: 'hr:calendar'
+      parameters:
+        - { name: department, in: query, schema: { type: string, maxLength: 36 } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200': { description: 'active members (names only)', content: { application/json: { schema: { $ref: '#/components/schemas/PersonList' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/calendar:
+    get:
+      operationId: calendar
+      x-freya-permission: 'hr:calendar'
+      parameters:
+        - { name: from, in: query, required: true, schema: { $ref: '#/components/schemas/Date' } }
+        - { name: to, in: query, required: true, schema: { $ref: '#/components/schemas/Date' } }
+        - { name: department, in: query, schema: { type: string, maxLength: 36 } }
+        - { name: user, in: query, schema: { type: string, maxLength: 128 } }
+      responses:
+        '200': { description: 'team calendar', content: { application/json: { schema: { $ref: '#/components/schemas/Calendar' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/absence-types:
+    get:
+      operationId: listAbsenceTypes
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ name: all, in: query, schema: { type: boolean }, description: 'include inactive types (hr:read)' }]
+      responses:
+        '200': { description: 'absence types', content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceTypeList' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createAbsenceType
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceTypeWrite' } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceType' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/absence-types/{id}:
+    get:
+      operationId: getAbsenceType
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: 'absence type', content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceType' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateAbsenceType
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceTypeWrite' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceType' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteAbsenceType
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/absence-types/{id}/signing-check:
+    get:
+      operationId: checkAbsenceTypeSigning
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: 'signing settings still valid', content: { application/json: { schema: { $ref: '#/components/schemas/SigningCheck' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/signing/templates:
+    get:
+      operationId: listSigningTemplates
+      x-freya-permission: 'hr:manage'
+      responses:
+        '200': { description: 'active signing templates of the tenant', content: { application/json: { schema: { $ref: '#/components/schemas/SigningTemplateList' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/pools:
+    get:
+      operationId: listPools
+      x-freya-permission: 'hr:read'
+      responses:
+        '200': { description: pools, content: { application/json: { schema: { $ref: '#/components/schemas/PoolList' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createPool
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PoolWrite' } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Pool' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/pools/{id}:
+    get:
+      operationId: getPool
+      x-freya-permission: 'hr:read'
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: pool, content: { application/json: { schema: { $ref: '#/components/schemas/Pool' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updatePool
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PoolWrite' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Pool' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deletePool
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/allowances:
+    get:
+      operationId: listAllowances
+      x-freya-permission: 'hr:calendar'
+      description: hr:read lists everyone; managers their departments; others (hr:request) their own.
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { $ref: '#/components/parameters/year' }
+        - { name: user, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: type, in: query, schema: { type: string, maxLength: 36 } }
+        - { name: pool, in: query, schema: { type: string, maxLength: 36 } }
+      responses:
+        '200': { description: 'page of allowances', content: { application/json: { schema: { $ref: '#/components/schemas/AllowancePage' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createAllowance
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AllowanceWrite' } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Allowance' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/allowances/{id}:
+    get:
+      operationId: getAllowance
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: allowance, content: { application/json: { schema: { $ref: '#/components/schemas/Allowance' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateAllowance
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AllowanceWrite' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Allowance' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteAllowance
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/balance/{user_id}:
+    get:
+      operationId: getBalance
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/userId' }, { $ref: '#/components/parameters/year' }]
+      responses:
+        '200': { description: balance, content: { application/json: { schema: { $ref: '#/components/schemas/Balance' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/carry-over/preview:
+    post:
+      operationId: previewCarryOver
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CarryOverRequest' } } } }
+      responses:
+        '200': { description: plan, content: { application/json: { schema: { $ref: '#/components/schemas/CarryOverPlan' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/carry-over:
+    post:
+      operationId: runCarryOver
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CarryOverRequest' } } } }
+      responses:
+        '200': { description: 'applied plan', content: { application/json: { schema: { $ref: '#/components/schemas/CarryOverPlan' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests:
+    get:
+      operationId: listRequests
+      x-freya-permission: 'hr:calendar'
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: view, in: query, schema: { type: string, enum: [mine, review, all] } }
+        - { name: user, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: department, in: query, schema: { type: string, maxLength: 36 } }
+        - { name: type, in: query, schema: { type: string, maxLength: 36 } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, awaiting_signing, approved, rejected, cancelled, revoked] } }
+        - { name: from, in: query, schema: { $ref: '#/components/schemas/Date' } }
+        - { name: to, in: query, schema: { $ref: '#/components/schemas/Date' } }
+      responses:
+        '200': { description: 'page of requests', content: { application/json: { schema: { $ref: '#/components/schemas/RequestPage' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createRequest
+      x-freya-permission: 'hr:request'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestWrite' } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/preview:
+    post:
+      operationId: previewRequest
+      x-freya-permission: 'hr:request'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestWrite' } } } }
+      responses:
+        '200': { description: preview, content: { application/json: { schema: { $ref: '#/components/schemas/Preview' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/{id}:
+    get:
+      operationId: getRequest
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: request, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateRequest
+      x-freya-permission: 'hr:request'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RequestEdit' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteRequest
+      x-freya-permission: 'hr:request'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/{id}/approve:
+    post:
+      operationId: approveRequest
+      x-freya-permission: 'hr:calendar'
+      description: routed approvers (department managers) or hr:manage; never the owner.
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Decision' } } } }
+      responses:
+        '200': { description: approved or awaiting signing, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/{id}/reject:
+    post:
+      operationId: rejectRequest
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Decision' } } } }
+      responses:
+        '200': { description: rejected, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/{id}/revoke:
+    post:
+      operationId: revokeRequest
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Decision' } } } }
+      responses:
+        '200': { description: revoked, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/{id}/cancel:
+    post:
+      operationId: cancelRequest
+      x-freya-permission: 'hr:request'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/Request' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/requests/{id}/signed-document:
+    get:
+      operationId: downloadSignedDocument
+      x-freya-permission: 'hr:calendar'
+      x-freya-timeout-seconds: 120
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: 'signed PDF', content: { application/pdf: { schema: { type: string, format: binary } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/departments:
+    get:
+      operationId: listDepartments
+      x-freya-permission: 'hr:calendar'
+      responses:
+        '200': { description: 'department tree (flat)', content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentList' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createDepartment
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentWrite' } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Department' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/departments/{id}:
+    put:
+      operationId: updateDepartment
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentWrite' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Department' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteDepartment
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/departments/{id}/members:
+    put:
+      operationId: setDepartmentMembers
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MembersWrite' } } } }
+      responses:
+        '204': { description: updated }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/holidays:
+    get:
+      operationId: listHolidays
+      x-freya-permission: 'hr:calendar'
+      parameters: [{ $ref: '#/components/parameters/year' }]
+      responses:
+        '200': { description: holidays, content: { application/json: { schema: { $ref: '#/components/schemas/HolidayList' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createHoliday
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/HolidayWrite' } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Holiday' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/holidays/{id}:
+    put:
+      operationId: updateHoliday
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/HolidayWrite' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Holiday' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteHoliday
+      x-freya-permission: 'hr:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/holidays/import:
+    post:
+      operationId: importHolidays
+      description: 'text/csv or text/plain: YYYY-MM-DD,name[,yearly] per line.'
+      x-freya-permission: 'hr:manage'
+      x-freya-max-body-bytes: 65536
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { name: dry_run, in: query, schema: { type: boolean } }]
+      responses:
+        '200': { description: 'import result', content: { application/json: { schema: { $ref: '#/components/schemas/ImportResult' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/stats:
+    get:
+      operationId: stats
+      x-freya-permission: 'hr:read'
+      responses:
+        '200': { description: statistics, content: { application/json: { schema: { $ref: '#/components/schemas/Stats' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/stream:
+    get:
+      operationId: streamEvents
+      description: >-
+        Long-lived SSE stream of the caller's hr events (request and review
+        changes addressed to them; calendar changes of the tenant; ids and
+        status only). The module closes it at 290 s and the client resumes
+        with last_id.
+      x-freya-permission: 'hr:calendar'
+      x-freya-timeout-seconds: 300
+      parameters: [{ name: last_id, in: query, schema: { type: string, maxLength: 64 } }]
+      responses:
+        '200': { description: 'SSE stream', content: { text/event-stream: { schema: { type: string } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/backup/export:
+    post:
+      operationId: exportBackup
+      x-freya-permission: 'hr:manage'
+      x-freya-timeout-seconds: 300
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      responses:
+        '200': { description: 'gzip archive', content: { application/gzip: { schema: { type: string, format: binary } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /api/hr/v1/backup/import:
+    post:
+      operationId: importBackup
+      x-freya-permission: 'hr:manage'
+      x-freya-max-body-bytes: 268435456
+      x-freya-timeout-seconds: 300
+      parameters:
+        - { $ref: '#/components/parameters/csrf' }
+        - { name: mode, in: query, schema: { type: string, enum: [skip, overwrite] } }
+      responses:
+        '200': { description: 'import summary', content: { application/json: { schema: { type: object } } } }
+        default: { $ref: '#/components/responses/Error' }

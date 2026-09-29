@@ -1,2 +1,0 @@
-Veselin Iordanov <veselin.iordanov@gmail.com> Claude <claude@whatever.com>
-Veselin Iordanov <veselin.iordanov@gmail.com> Claude <claude@users.noreply.github.com>
