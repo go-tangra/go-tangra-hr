@@ -5,8 +5,10 @@ go 1.26.3
 toolchain go1.26.8
 
 require (
+	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-tangra/go-tangra-auth/sdk/v4 v4.2.0
 	github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0
+	github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0
 	github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0
 	github.com/go-tangra/go-tangra/v4 v4.2.3
 	github.com/jackc/pgx/v5 v5.11.0
@@ -15,6 +17,17 @@ require (
 	github.com/valkey-io/valkey-go v1.0.78
 	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/go-kratos/kratos/v3 v3.0.0 // indirect
+	github.com/go-openapi/jsonpointer v0.22.5 // indirect
+	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
+	github.com/go-playground/form/v4 v4.3.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+	github.com/oasdiff/yaml v0.1.1 // indirect
+	github.com/oasdiff/yaml3 v0.0.14 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 )
 
 require (
