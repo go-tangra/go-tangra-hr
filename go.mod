@@ -6,10 +6,12 @@ toolchain go1.26.8
 
 require (
 	github.com/go-tangra/go-tangra-auth/sdk/v4 v4.2.0
+	github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0
 	github.com/go-tangra/go-tangra/v4 v4.2.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/testcontainers/testcontainers-go v0.44.0
+	github.com/valkey-io/valkey-go v1.0.78
 	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v3 v3.0.1
 )
