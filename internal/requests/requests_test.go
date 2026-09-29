@@ -418,3 +418,52 @@ func TestCalendar(t *testing.T) {
 	_ = leavedays.Tenths(0)
 	_ = time.Now
 }
+
+// A leave spanning New Year is charged to each year's allowance (FR-015).
+func TestTwoYearCharge(t *testing.T) {
+	f := setup(t)
+	next := store.Allowance{ID: store.NewID(), TenantID: tn, UserID: "maria", Year: 2027, AbsenceTypeID: f.annual.ID, Total: 100}
+	if err := f.m.CreateAllowance(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.s.Create(ctx, maria, Input{AbsenceTypeID: f.annual.ID, Start: d(2026, 12, 23), End: d(2027, 1, 5)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2026: 23, 24, 28, 29, 30, 31 (25 recurring holiday) = 6; 2027: 1, 4, 5 = 3.
+	if r.Days != 90 {
+		t.Fatalf("days = %v", r.Days)
+	}
+	if _, err := f.s.Approve(ctx, petar, r.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if f.allowance(t, f.mariaAnnual.ID).Used != 60 || f.allowance(t, next.ID).Used != 30 {
+		t.Fatalf("split: %v %v", f.allowance(t, f.mariaAnnual.ID).Used, f.allowance(t, next.ID).Used)
+	}
+	if cs, _ := f.m.Charges(ctx, tn, r.ID); len(cs) != 2 {
+		t.Fatalf("charges: %+v", cs)
+	}
+	// A holiday added later does not change what is charged (the stored days win).
+	_ = f.m.CreateHoliday(ctx, store.Holiday{ID: store.NewID(), TenantID: tn, Date: d(2027, 1, 4), Name: "Late holiday"})
+	if _, err := f.s.Revoke(ctx, petar, r.ID, ""); err != nil || f.allowance(t, next.ID).Used != 0 || f.allowance(t, f.mariaAnnual.ID).Used != 0 {
+		t.Fatalf("refund: %v", err)
+	}
+	r2, _ := f.s.Create(ctx, maria, Input{AbsenceTypeID: f.annual.ID, Start: d(2026, 12, 23), End: d(2027, 1, 5)})
+	_ = f.m.CreateHoliday(ctx, store.Holiday{ID: store.NewID(), TenantID: tn, Date: d(2027, 1, 5), Name: "Later still"})
+	per, err := f.s.perYear(ctx, r2)
+	if err != nil || per[2026]+per[2027] != r2.Days {
+		t.Fatalf("stored total wins: %v %v", per, err)
+	}
+	f.calErr = errors.New("db")
+	if _, err := f.s.perYear(ctx, r2); err == nil {
+		t.Fatal("calendar error")
+	}
+	f.calErr = nil
+	odd := r2
+	odd.HalfEnd, odd.Start = true, d(2027, 1, 9) // start after end: the split fails, the stored days go to the last year
+	odd.Start, odd.End = d(2026, 12, 26), d(2027, 1, 2)
+	odd.HalfStart, odd.HalfEnd = false, false
+	if per, _ := f.s.perYear(ctx, odd); per[2027] != odd.Days-per[2026] {
+		t.Fatalf("remainder to the last year: %v", per)
+	}
+}
