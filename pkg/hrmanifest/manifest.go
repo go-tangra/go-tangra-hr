@@ -102,14 +102,14 @@ var Abilities = []gatewayclient.Ability{
 
 // Nav lists the navigation contributions.
 var Nav = []gatewayclient.NavEntry{
-	{Title: "Leave calendar", Path: "/hr", Icon: "mdi-calendar-month-outline", Order: 940, Requires: "hr:calendar"},
-	{Title: "My leave", Path: "/hr/requests", Icon: "mdi-beach", Order: 941, Requires: "hr:request"},
+	{Title: "Leave calendar", Path: "/hr", Icon: "mdi-calendar-clock", Order: 940, Requires: "hr:calendar"},
+	{Title: "My leave", Path: "/hr/requests", Icon: "mdi-white-balance-sunny", Order: 941, Requires: "hr:request"},
 	{Title: "To review", Path: "/hr/review", Icon: "mdi-clipboard-check-outline", Order: 942, Requires: "hr:request"},
-	{Title: "Allowances", Path: "/hr/allowances", Icon: "mdi-scale-balance", Order: 943, Requires: "hr:read"},
+	{Title: "Allowances", Path: "/hr/allowances", Icon: "mdi-progress-clock", Order: 943, Requires: "hr:read"},
 	{Title: "Absence types", Path: "/hr/absence-types", Icon: "mdi-shape-outline", Order: 944, Requires: "hr:read"},
-	{Title: "Departments", Path: "/hr/departments", Icon: "mdi-sitemap-outline", Order: 945, Requires: "hr:read"},
-	{Title: "Holidays", Path: "/hr/holidays", Icon: "mdi-party-popper", Order: 946, Requires: "hr:read"},
-	{Title: "HR statistics", Path: "/hr/stats", Icon: "mdi-chart-box-outline", Order: 947, Requires: "hr:read"},
+	{Title: "Departments", Path: "/hr/departments", Icon: "mdi-account-network-outline", Order: 945, Requires: "hr:read"},
+	{Title: "Holidays", Path: "/hr/holidays", Icon: "mdi-flag", Order: 946, Requires: "hr:read"},
+	{Title: "HR statistics", Path: "/hr/stats", Icon: "mdi-chart-line", Order: 947, Requires: "hr:read"},
 }
 
 // PermissionRefs lists "resource:action" for every declared permission.
