@@ -52,6 +52,11 @@ func (s *Service) List(ctx context.Context, subj authz.Subjects, f ListFilter) (
 	if err != nil {
 		return nil, 0, err
 	}
+	// An empty UserID/ApproverID means "anyone" to the store: the own and
+	// review views are refused without a user id, never widened.
+	if (f.View == ViewMine || f.View == "" || f.View == ViewReview) && subj.UserID == "" {
+		return nil, 0, apperr.Forbidden
+	}
 	switch f.View {
 	case ViewMine, "":
 		rf.UserID = subj.UserID

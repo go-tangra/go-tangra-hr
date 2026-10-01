@@ -11,7 +11,7 @@ require (
 	github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0
 	github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0
 	github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0
-	github.com/go-tangra/go-tangra/v4 v4.3.0
+	github.com/go-tangra/go-tangra/v4 v4.3.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/testcontainers/testcontainers-go v0.44.0
