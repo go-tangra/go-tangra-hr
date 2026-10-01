@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-hr/v4/internal/apperr"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/audit"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/authz"
@@ -236,8 +238,7 @@ type Filter struct {
 	Year          int
 	AbsenceTypeID string
 	PoolID        string
-	Page          int
-	PageSize      int
+	List          listquery.Request // page, size and sort (store.AllowanceList)
 }
 
 // List lists allowances visible to the caller.
@@ -247,7 +248,7 @@ func (s *Service) List(ctx context.Context, subj authz.Subjects, f Filter) ([]st
 		return nil, 0, err
 	}
 	rf := repo.AllowanceFilter{UserID: f.UserID, UserIDs: users, Year: f.Year, AbsenceTypeID: f.AbsenceTypeID, PoolID: f.PoolID,
-		Page: f.Page, PageSize: f.PageSize}
+		List: f.List}
 	return s.d.Store.ListAllowances(ctx, subj.TenantID, rf)
 }
 

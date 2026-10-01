@@ -8,21 +8,25 @@ import { UiAlert, UiButton, UiCard, UiCheckbox, UiDataTable, UiDrawer, UiInput, 
 import { vCssom } from '@/utils/cssom'
 import { api, describe, describeRefusal } from '@/api/client'
 import type { AbsenceType, AbsenceTypeWrite, Pool, PoolWrite, SigningSettings } from '@/api/types'
+import { useServerList } from '@/composables/useServerList'
 import SigningSettingsEditor from '@/components/SigningSettings.vue'
 import { useOrg } from '@/stores/org'
 
 const org = useOrg()
 const toast = useToast()
 const tab = ref('types')
-const types = ref<AbsenceType[]>([])
 const pools = ref<Pool[]>([])
 const error = ref('')
+// The types table is server-paged (api/openapi/hr.yaml listAbsenceTypes);
+// pool membership reads the whole type list of the org store.
+const list = useServerList<AbsenceType>('types', 'absence-types', { sortable: ['sort_order', 'name'], defaultSort: { key: 'sort_order', dir: 'asc' } }, () => ({ all: true }))
+const { lq } = list
 
 async function load(): Promise<void> {
   error.value = ''
   try {
     await org.load()
-    types.value = (await api<{ items: AbsenceType[] }>('GET', 'absence-types', undefined, { query: { all: true } })).items ?? []
+    await list.load()
     pools.value = (await api<{ items: Pool[] }>('GET', 'pools')).items ?? []
   } catch (e) {
     error.value = describe(e)
@@ -96,6 +100,7 @@ async function remove(kind: 'type' | 'pool', id: string, name: string): Promise<
   try {
     await api('DELETE', `${kind === 'type' ? 'absence-types' : 'pools'}/${id}` as 'pools/{id}')
     toast.show({ kind: 'success', title: 'Deleted' })
+    if (kind === 'type') await org.load(true)
     await load()
   } catch (e) {
     toast.show({ kind: 'error', title: describeRefusal(e) })
@@ -104,7 +109,8 @@ async function remove(kind: 'type' | 'pool', id: string, name: string): Promise<
 
 type TRow = AbsenceType & Record<string, unknown>
 const typeColumns: Column<TRow>[] = [
-  { key: 'name', label: 'Name' },
+  { key: 'name', label: 'Name', sortable: true },
+  { key: 'sort_order', label: 'Order', width: 'sm', format: (x) => String(x.sort_order ?? 0), sortable: true },
   { key: 'rules', label: 'Rules', format: (x) => [x.deducts ? `Deducts${x.pool_id ? ' (' + poolName(x.pool_id) + ')' : ''}` : 'No deduction',
     x.requires_approval ? 'Approval' : 'No approval', x.requires_signing ? 'Signed document' : ''].filter(Boolean).join(' · ') },
   { key: 'active', label: 'Active', width: 'sm', format: (x) => (x.active ? 'Yes' : 'No') },
@@ -112,7 +118,7 @@ const typeColumns: Column<TRow>[] = [
 type PRow = Pool & Record<string, unknown>
 const poolColumns: Column<PRow>[] = [
   { key: 'name', label: 'Name' },
-  { key: 'members', label: 'Absence types', format: (x) => types.value.filter((y) => y.pool_id === x.id).map((y) => y.name).join(', ') },
+  { key: 'members', label: 'Absence types', format: (x) => org.types.filter((y) => y.pool_id === x.id).map((y) => y.name).join(', ') },
   { key: 'carry_over_cap', label: 'Carry-over cap', format: (x) => (x.carry_over_cap === null || x.carry_over_cap === undefined ? 'No cap' : String(x.carry_over_cap)) },
 ]
 const tabs = [{ key: 'types', label: 'Absence types' }, { key: 'pools', label: 'Allowance pools' }]
@@ -125,12 +131,14 @@ const tabs = [{ key: 'types', label: 'Absence types' }, { key: 'pools', label: '
       <UiButton v-if="org.canManage && tab === 'pools'" icon="mdi-plus" data-test="pool-new" @click="openPool()">New pool</UiButton>
     </template>
     <div class="flex min-w-0 flex-col gap-3">
-      <UiAlert v-if="error" kind="error">{{ error }}</UiAlert>
+      <UiAlert v-if="error || list.error.value" kind="error">{{ error || list.error.value }}</UiAlert>
       <UiTabs v-model="tab" :tabs="tabs" />
       <UiCard v-if="tab === 'types'" :padded="false">
         <UiDataTable
-          :items="(types as TRow[])" :columns="typeColumns" caption="Absence types" empty-title="No absence types" :clickable="org.canManage"
+          :items="(list.items.value as TRow[])" :total="list.total.value" :page="lq.page.value" :page-size="lq.pageSize.value" :sort="lq.sort.value"
+          :loading="list.loading.value" :columns="typeColumns" caption="Absence types" empty-title="No absence types" :clickable="org.canManage"
           :row-attrs="(x) => ({ 'data-test': 'type-row-' + x.id })" data-test="types-table" @row-click="openType($event)"
+          @update:page="lq.setPage" @update:page-size="lq.setPageSize" @update:sort="lq.setSort"
         >
           <template #cell-name="{ row }">
             <span class="inline-flex items-center gap-2"><span v-cssom="{ 'background-color': row.color || '#64748b' }" class="inline-block size-3 rounded-full" />{{ row.name }}</span>

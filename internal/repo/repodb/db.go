@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -97,9 +98,35 @@ func unjs(b []byte, v any) error {
 	return json.Unmarshal(b, v)
 }
 
-func pageArgs(p, size int) (int, int) {
-	p, size = store.Page(p, size, 500)
-	return size, (p - 1) * size
+// qualify prefixes every column of a select list (plain columns, casts and
+// COALESCE(col…) items) with alias, for queries that join other tables.
+func qualify(alias, cols string) string {
+	var items []string
+	depth, start := 0, 0
+	for i, c := range cols {
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				items = append(items, cols[start:i])
+				start = i + 1
+			}
+		}
+	}
+	items = append(items, cols[start:])
+	for i, it := range items {
+		it = strings.TrimSpace(it)
+		if rest, ok := strings.CutPrefix(it, "COALESCE("); ok {
+			it = "COALESCE(" + alias + "." + rest
+		} else {
+			it = alias + "." + it
+		}
+		items[i] = it
+	}
+	return strings.Join(items, ", ")
 }
 
 func affected(tag pgconn.CommandTag) error {
@@ -400,24 +427,35 @@ func (d *DB) GetAllowance(ctx context.Context, tenantID, id string) (a store.All
 	return a, err
 }
 
-// ListAllowances implements repo.Store.
+// allowanceListCols are allowanceCols qualified for the paged list query (a).
+var allowanceListCols = qualify("a", allowanceCols)
+
+// ListAllowances implements repo.Store. All lists in the default order (year
+// desc, user, id); otherwise f.List pages and sorts (store.AllowanceList) with
+// the member, absence type and pool joined for the name sorts.
 func (d *DB) ListAllowances(ctx context.Context, tenantID string, f repo.AllowanceFilter) (out []store.Allowance, total int, err error) {
-	where := `tenant_id=$1 AND ($2 = '' OR user_id=$2) AND ($3::text[] IS NULL OR user_id = ANY($3)) AND ($4 = 0 OR year=$4)
-		AND ($5 = '' OR absence_type_id::text=$5) AND ($6 = '' OR pool_id::text=$6)`
+	where := `a.tenant_id=$1 AND ($2 = '' OR a.user_id=$2) AND ($3::text[] IS NULL OR a.user_id = ANY($3)) AND ($4 = 0 OR a.year=$4)
+		AND ($5 = '' OR a.absence_type_id::text=$5) AND ($6 = '' OR a.pool_id::text=$6)`
 	var ids any
 	if f.UserIDs != nil {
 		ids = f.UserIDs
 	}
 	args := []any{tenantID, f.UserID, ids, f.Year, f.AbsenceTypeID, f.PoolID}
 	err = d.run(ctx, tenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM hr_allowances WHERE `+where, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM hr_allowances a WHERE `+where, args...).Scan(&total); err != nil {
 			return err
 		}
-		q := `SELECT ` + allowanceCols + ` FROM hr_allowances WHERE ` + where + ` ORDER BY year DESC, user_id, id`
-		if !f.All {
-			lim, off := pageArgs(f.Page, f.PageSize)
-			q += ` LIMIT $7 OFFSET $8`
-			args = append(args, lim, off)
+		var q string
+		if f.All {
+			q = `SELECT ` + allowanceListCols + ` FROM hr_allowances a WHERE ` + where + ` ORDER BY a.year DESC, a.user_id, a.id`
+		} else {
+			req := store.ListOrDefault(f.List, store.AllowanceList).Clamp(total)
+			q = `SELECT ` + allowanceListCols + ` FROM hr_allowances a
+				LEFT JOIN hr_members m ON m.tenant_id = a.tenant_id AND m.user_id = a.user_id
+				LEFT JOIN hr_absence_types t ON t.tenant_id = a.tenant_id AND t.id = a.absence_type_id
+				LEFT JOIN hr_pools p ON p.tenant_id = a.tenant_id AND p.id = a.pool_id
+				WHERE ` + where + ` ORDER BY ` + req.OrderBy(store.AllowanceList) + ` LIMIT $7 OFFSET $8`
+			args = append(args, req.Limit(), req.Offset())
 		}
 		rows, err := tx.Query(ctx, q, args...)
 		if err != nil {
@@ -600,11 +638,16 @@ func (d *DB) DeleteRequest(ctx context.Context, tenantID, id string) error {
 	})
 }
 
-// ListRequests implements repo.Store.
+// requestListCols are requestCols qualified for the paged list query (r).
+var requestListCols = qualify("r", requestCols)
+
+// ListRequests implements repo.Store. All lists in the default order (start
+// date desc, id desc); otherwise f.List pages and sorts (store.RequestList)
+// with the member joined for the name sort.
 func (d *DB) ListRequests(ctx context.Context, tenantID string, f repo.RequestFilter) (out []store.Request, total int, err error) {
-	where := `tenant_id=$1 AND ($2 = '' OR user_id=$2) AND ($3::text[] IS NULL OR user_id = ANY($3))
-		AND ($4 = '' OR absence_type_id::text=$4) AND ($5::text[] IS NULL OR status = ANY($5))
-		AND ($6::date IS NULL OR end_date >= $6) AND ($7::date IS NULL OR start_date <= $7) AND ($8 = '' OR $8 = ANY(approver_ids))`
+	where := `r.tenant_id=$1 AND ($2 = '' OR r.user_id=$2) AND ($3::text[] IS NULL OR r.user_id = ANY($3))
+		AND ($4 = '' OR r.absence_type_id::text=$4) AND ($5::text[] IS NULL OR r.status = ANY($5))
+		AND ($6::date IS NULL OR r.end_date >= $6) AND ($7::date IS NULL OR r.start_date <= $7) AND ($8 = '' OR $8 = ANY(r.approver_ids))`
 	var ids, statuses any
 	if f.UserIDs != nil {
 		ids = f.UserIDs
@@ -614,14 +657,18 @@ func (d *DB) ListRequests(ctx context.Context, tenantID string, f repo.RequestFi
 	}
 	args := []any{tenantID, f.UserID, ids, f.AbsenceTypeID, statuses, f.From, f.To, f.ApproverID}
 	err = d.run(ctx, tenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM hr_requests WHERE `+where, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM hr_requests r WHERE `+where, args...).Scan(&total); err != nil {
 			return err
 		}
-		q := `SELECT ` + requestCols + ` FROM hr_requests WHERE ` + where + ` ORDER BY start_date DESC, id DESC`
-		if !f.All {
-			lim, off := pageArgs(f.Page, f.PageSize)
-			q += ` LIMIT $9 OFFSET $10`
-			args = append(args, lim, off)
+		var q string
+		if f.All {
+			q = `SELECT ` + requestListCols + ` FROM hr_requests r WHERE ` + where + ` ORDER BY r.start_date DESC, r.id DESC`
+		} else {
+			req := store.ListOrDefault(f.List, store.RequestList).Clamp(total)
+			q = `SELECT ` + requestListCols + ` FROM hr_requests r
+				LEFT JOIN hr_members m ON m.tenant_id = r.tenant_id AND m.user_id = r.user_id
+				WHERE ` + where + ` ORDER BY ` + req.OrderBy(store.RequestList) + ` LIMIT $9 OFFSET $10`
+			args = append(args, req.Limit(), req.Offset())
 		}
 		rows, err := tx.Query(ctx, q, args...)
 		if err != nil {

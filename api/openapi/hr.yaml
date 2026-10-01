@@ -34,11 +34,17 @@ components:
     page:
       name: page
       in: query
-      schema: { type: integer, minimum: 1, maximum: 100000 }
+      description: '1-based page; beyond the last page returns the last page'
+      schema: { type: integer, minimum: 1, maximum: 2147483647 }
     pageSize:
       name: page_size
       in: query
-      schema: { type: integer, minimum: 1, maximum: 500 }
+      schema: { type: integer, minimum: 1, maximum: 200 }
+    order:
+      name: order
+      in: query
+      description: 'sort direction; defaults to the sort field''s default direction'
+      schema: { type: string, enum: [asc, desc] }
     year:
       name: year
       in: query
@@ -52,7 +58,7 @@ components:
           type: string
           description: >
             unauthenticated | forbidden | not_found | malformed_body | body_too_large |
-            validation | overlap | insufficient_allowance | no_allowance | zero_days |
+            validation | validation_failed (list page, page_size, sort or order; detail.param names it) | overlap | insufficient_allowance | no_allowance | zero_days |
             invalid_transition | self_review | not_routed | in_use | duplicate | not_empty |
             cycle | signing_unavailable | signing_template_invalid | signer_inactive |
             not_signed | conflict | payload_too_large | invalid_backup | temporarily_unavailable
@@ -133,9 +139,15 @@ components:
         signing: { oneOf: [{ $ref: '#/components/schemas/SigningSettings' }, { type: 'null' }] }
     AbsenceTypeList:
       type: object
-      required: [items]
+      description: 'List contract page (go-tangra specs/032-server-side-tables)'
+      required: [items, total, page, page_size, sort, order]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/AbsenceType' } }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        sort: { type: string }
+        order: { type: string, enum: [asc, desc] }
     SigningCheck:
       type: object
       required: [ok]
@@ -213,10 +225,15 @@ components:
         notes: { type: string, maxLength: 2000 }
     AllowancePage:
       type: object
-      required: [items, total]
+      description: 'List contract page (go-tangra specs/032-server-side-tables)'
+      required: [items, total, page, page_size, sort, order]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/Allowance' } }
         total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        sort: { type: string }
+        order: { type: string, enum: [asc, desc] }
     BalanceLine:
       type: object
       required: [kind, id, name, total, carried, used, pending, remaining, member_type_ids]
@@ -304,10 +321,15 @@ components:
         status: { type: string }
     RequestPage:
       type: object
-      required: [items, total]
+      description: 'List contract page (go-tangra specs/032-server-side-tables)'
+      required: [items, total, page, page_size, sort, order]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/Request' } }
         total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        sort: { type: string }
+        order: { type: string, enum: [asc, desc] }
     Calendar:
       type: object
       required: [people, events, holidays]
@@ -378,9 +400,15 @@ components:
         recurring: { type: boolean }
     HolidayList:
       type: object
-      required: [items]
+      description: 'List contract page (go-tangra specs/032-server-side-tables)'
+      required: [items, total, page, page_size, sort, order]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/Holiday' } }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        sort: { type: string }
+        order: { type: string, enum: [asc, desc] }
     ImportResult:
       type: object
       required: [created, skipped, errors, dry_run]
@@ -471,7 +499,12 @@ paths:
     get:
       operationId: listAbsenceTypes
       x-freya-permission: 'hr:calendar'
-      parameters: [{ name: all, in: query, schema: { type: boolean }, description: 'include inactive types (hr:read)' }]
+      parameters:
+        - { name: all, in: query, schema: { type: boolean }, description: 'include inactive types (hr:read)' }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, schema: { type: string, enum: [sort_order, name] } }
+        - { $ref: '#/components/parameters/order' }
       responses:
         '200': { description: 'absence types', content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceTypeList' } } } }
         default: { $ref: '#/components/responses/Error' }
@@ -563,10 +596,12 @@ paths:
     get:
       operationId: listAllowances
       x-freya-permission: 'hr:calendar'
-      description: hr:read lists everyone; managers their departments; others (hr:request) their own.
+      description: hr:read lists everyone; managers their departments; others (hr:request) their own. "user" sorts by the person's name, "type" by the absence type or pool name.
       parameters:
         - { $ref: '#/components/parameters/page' }
         - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, schema: { type: string, enum: [year, user, type, total, remaining] } }
+        - { $ref: '#/components/parameters/order' }
         - { $ref: '#/components/parameters/year' }
         - { name: user, in: query, schema: { type: string, maxLength: 128 } }
         - { name: type, in: query, schema: { type: string, maxLength: 36 } }
@@ -635,9 +670,12 @@ paths:
     get:
       operationId: listRequests
       x-freya-permission: 'hr:calendar'
+      description: '"user" sorts by the person''s name (people without one last).'
       parameters:
         - { $ref: '#/components/parameters/page' }
         - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, schema: { type: string, enum: [start_date, end_date, status, days, created_at, user] } }
+        - { $ref: '#/components/parameters/order' }
         - { name: view, in: query, schema: { type: string, enum: [mine, review, all] } }
         - { name: user, in: query, schema: { type: string, maxLength: 128 } }
         - { name: department, in: query, schema: { type: string, maxLength: 36 } }
@@ -777,7 +815,12 @@ paths:
     get:
       operationId: listHolidays
       x-freya-permission: 'hr:calendar'
-      parameters: [{ $ref: '#/components/parameters/year' }]
+      parameters:
+        - { $ref: '#/components/parameters/year' }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, schema: { type: string, enum: [date, name] } }
+        - { $ref: '#/components/parameters/order' }
       responses:
         '200': { description: holidays, content: { application/json: { schema: { $ref: '#/components/schemas/HolidayList' } } } }
         default: { $ref: '#/components/responses/Error' }

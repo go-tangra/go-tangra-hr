@@ -15,6 +15,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-hr/v4/internal/leavedays"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/store"
 )
@@ -33,9 +35,8 @@ type AllowanceFilter struct {
 	Year          int      // 0 = any
 	AbsenceTypeID string
 	PoolID        string
-	All           bool // no paging
-	Page          int
-	PageSize      int
+	All           bool              // no paging, default order (internal callers)
+	List          listquery.Request // page, size and sort (store.AllowanceList); zero = default first page
 }
 
 // RequestFilter narrows ListRequests.
@@ -45,10 +46,9 @@ type RequestFilter struct {
 	AbsenceTypeID string
 	Statuses      []string // nil = any
 	From, To      *time.Time
-	ApproverID    string // routed to this user
-	All           bool   // no paging
-	Page          int
-	PageSize      int
+	ApproverID    string            // routed to this user
+	All           bool              // no paging, default order (internal callers)
+	List          listquery.Request // page, size and sort (store.RequestList); zero = default first page
 }
 
 // Store is the complete storage contract.
