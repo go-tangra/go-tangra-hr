@@ -4,9 +4,10 @@
 // departments, others their own. HR administrators add and edit allowances
 // and carry unused days into the next year (preview first).
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { UiAlert, UiButton, UiCard, UiDataTable, UiDialog, UiDrawer, UiNumberInput, UiPage, UiPagination, UiSelect, UiTextarea, useConfirm, useToast, type Column, type SelectOption } from '@go-tangra/ui'
+import { UiAlert, UiButton, UiCard, UiDataTable, UiDialog, UiDrawer, UiNumberInput, UiPage, UiSelect, UiTextarea, useConfirm, useToast, type Column, type SelectOption } from '@go-tangra/ui'
 import { api, describe, describeRefusal } from '@/api/client'
-import type { Allowance, AllowancePage, AllowanceWrite, CarryOverPlan, Pool } from '@/api/types'
+import type { Allowance, AllowanceWrite, CarryOverPlan, Pool } from '@/api/types'
+import { useServerList } from '@/composables/useServerList'
 import { useOrg } from '@/stores/org'
 import { days } from '@/utils/format'
 
@@ -15,12 +16,8 @@ const toast = useToast()
 const confirm = useConfirm()
 const thisYear = new Date().getFullYear()
 const f = reactive({ year: String(thisYear), user: '' })
-const items = ref<Allowance[]>([])
-const total = ref(0)
-const page = ref(1)
 const pools = ref<Pool[]>([])
 const error = ref('')
-const loading = ref(false)
 
 const years = computed<SelectOption[]>(() => [-2, -1, 0, 1].map((d) => ({ title: String(thisYear + d), value: String(thisYear + d) })))
 const peopleOptions = computed<SelectOption[]>(() => org.people.map((p) => ({ title: p.name, value: p.user_id })))
@@ -30,21 +27,17 @@ const targetOptions = computed<SelectOption[]>(() => [
 ])
 const target = (a: Allowance) => (a.pool_id ? pools.value.find((p) => p.id === a.pool_id)?.name : org.typeById.get(a.absence_type_id ?? '')?.name) ?? ''
 
-async function load(p = page.value): Promise<void> {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await api<AllowancePage>('GET', 'allowances', undefined, { query: { year: Number(f.year), user: f.user || undefined, page: p, page_size: 50 } })
-    items.value = res.items ?? []
-    total.value = res.total ?? 0
-    page.value = p
-  } catch (e) {
-    error.value = describe(e)
-  } finally {
-    loading.value = false
-  }
-}
-watch(f, () => void load(1))
+// Server-paged (api/openapi/hr.yaml listAllowances): "user" sorts by name,
+// "type" by the absence type or pool name. The year filter always narrows to
+// one year, so the table starts sorted by person rather than by year.
+const list = useServerList<Allowance>(
+  'allowances',
+  'allowances',
+  { sortable: ['year', 'user', 'type', 'total', 'remaining'], defaultSort: { key: 'user', dir: 'asc' }, defaultSize: 50 },
+  () => ({ year: Number(f.year), user: f.user || undefined }),
+)
+const { lq, load } = list
+watch(f, () => list.search())
 onMounted(async () => {
   try {
     await org.load()
@@ -52,7 +45,7 @@ onMounted(async () => {
   } catch (e) {
     error.value = describe(e)
   }
-  void load(1)
+  void load()
 })
 
 // --- drawer ---
@@ -121,14 +114,13 @@ async function run(): Promise<void> {
 
 type Row = Allowance & Record<string, unknown>
 const columns: Column<Row>[] = [
-  { key: 'user_id', label: 'Person', format: (a) => org.name(a.user_id) },
-  { key: 'target', label: 'For', format: (a) => target(a) },
-  { key: 'total_days', label: 'Total', width: 'sm', format: (a) => days(a.total_days) },
+  { key: 'user', label: 'Person', format: (a) => org.name(a.user_id), sortable: true },
+  { key: 'type', label: 'For', format: (a) => target(a), sortable: true },
+  { key: 'total', label: 'Total', width: 'sm', format: (a) => days(a.total_days), sortable: true, defaultDir: 'desc' },
   { key: 'carried_over', label: 'Carried', width: 'sm', format: (a) => days(a.carried_over) },
   { key: 'used_days', label: 'Used', width: 'sm', format: (a) => days(a.used_days) },
-  { key: 'remaining', label: 'Remaining', width: 'sm', format: (a) => days(a.remaining) },
+  { key: 'remaining', label: 'Remaining', width: 'sm', format: (a) => days(a.remaining), sortable: true, defaultDir: 'desc' },
 ]
-const pages = computed(() => Math.max(1, Math.ceil(total.value / 50)))
 type CRow = CarryOverPlan['items'][number] & Record<string, unknown>
 const carryColumns: Column<CRow>[] = [
   { key: 'user_id', label: 'Person', format: (i) => org.name(i.user_id ?? '') },
@@ -151,11 +143,13 @@ const carryColumns: Column<CRow>[] = [
           <UiSelect id="allowance-user" v-model="f.user" label="Person" :options="peopleOptions" placeholder="Everyone" clearable size="sm" />
         </div>
       </UiCard>
-      <UiAlert v-if="error" kind="error">{{ error }}</UiAlert>
+      <UiAlert v-if="error || list.error.value" kind="error">{{ error || list.error.value }}</UiAlert>
       <UiCard :padded="false">
         <UiDataTable
-          :items="(items as Row[])" :columns="columns" :loading="loading" caption="Allowances" empty-title="No allowances"
+          :items="(list.items.value as Row[])" :total="list.total.value" :page="lq.page.value" :page-size="lq.pageSize.value" :sort="lq.sort.value"
+          :columns="columns" :loading="list.loading.value" caption="Allowances" empty-title="No allowances"
           :clickable="org.canManage" :row-attrs="(a) => ({ 'data-test': 'allowance-row-' + a.id })" data-test="allowances-table" @row-click="open($event)"
+          @update:page="lq.setPage" @update:page-size="lq.setPageSize" @update:sort="lq.setSort"
         >
           <template v-if="org.canManage" #actions="{ row }">
             <div class="flex justify-end" @click.stop>
@@ -164,7 +158,6 @@ const carryColumns: Column<CRow>[] = [
           </template>
         </UiDataTable>
       </UiCard>
-      <UiPagination v-if="pages > 1" :has-prev="page > 1" :has-next="page < pages" :label="`Page ${page} of ${pages}`" @prev="load(page - 1)" @next="load(page + 1)" />
     </div>
 
     <UiDrawer v-model="d.open" :title="d.id ? 'Edit allowance' : 'New allowance'">

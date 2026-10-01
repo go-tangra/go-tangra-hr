@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
+import { fetchAll } from '@/composables/useServerList'
 import type { AbsenceType, Department, Me, Person } from '@/api/types'
 
 // Who the caller is and the tenant's shared reference data: people (names),
@@ -27,14 +28,13 @@ export const useOrg = defineStore('hr-org', () => {
       api<Me>('GET', 'me'),
       api<{ items: Person[] }>('GET', 'people'),
       api<{ items: Department[] }>('GET', 'departments'),
-      api<{ items: AbsenceType[] }>('GET', 'absence-types', undefined, { query: { all: true } }).catch(() =>
-        api<{ items: AbsenceType[] }>('GET', 'absence-types'),
-      ),
+      // The list is paged (list contract); reference data wants all of it.
+      fetchAll<AbsenceType>('absence-types', { all: true }).catch(() => fetchAll<AbsenceType>('absence-types')),
     ])
     me.value = m
     people.value = p.items ?? []
     departments.value = d.items ?? []
-    types.value = t.items ?? []
+    types.value = t
     loaded.value = true
   }
 

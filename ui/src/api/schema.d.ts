@@ -171,7 +171,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description hr:read lists everyone; managers their departments; others (hr:request) their own. */
+        /** @description hr:read lists everyone; managers their departments; others (hr:request) their own. "user" sorts by the person's name, "type" by the absence type or pool name. */
         get: operations["listAllowances"];
         put?: never;
         post: operations["createAllowance"];
@@ -252,6 +252,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description "user" sorts by the person's name (people without one last). */
         get: operations["listRequests"];
         put?: never;
         post: operations["createRequest"];
@@ -541,7 +542,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         Error: {
-            /** @description unauthenticated | forbidden | not_found | malformed_body | body_too_large | validation | overlap | insufficient_allowance | no_allowance | zero_days | invalid_transition | self_review | not_routed | in_use | duplicate | not_empty | cycle | signing_unavailable | signing_template_invalid | signer_inactive | not_signed | conflict | payload_too_large | invalid_backup | temporarily_unavailable */
+            /** @description unauthenticated | forbidden | not_found | malformed_body | body_too_large | validation | validation_failed (list page, page_size, sort or order; detail.param names it) | overlap | insufficient_allowance | no_allowance | zero_days | invalid_transition | self_review | not_routed | in_use | duplicate | not_empty | cycle | signing_unavailable | signing_template_invalid | signer_inactive | not_signed | conflict | payload_too_large | invalid_backup | temporarily_unavailable */
             reason: string;
             field?: string;
             detail?: Record<string, never>;
@@ -607,8 +608,15 @@ export interface components {
             requires_signing?: boolean;
             signing?: components["schemas"]["SigningSettings"] | null;
         };
+        /** @description List contract page (go-tangra specs/032-server-side-tables) */
         AbsenceTypeList: {
             items: components["schemas"]["AbsenceType"][];
+            total: number;
+            page: number;
+            page_size: number;
+            sort: string;
+            /** @enum {string} */
+            order: "asc" | "desc";
         };
         SigningCheck: {
             ok: boolean;
@@ -671,9 +679,15 @@ export interface components {
             carried_over?: number;
             notes?: string;
         };
+        /** @description List contract page (go-tangra specs/032-server-side-tables) */
         AllowancePage: {
             items: components["schemas"]["Allowance"][];
             total: number;
+            page: number;
+            page_size: number;
+            sort: string;
+            /** @enum {string} */
+            order: "asc" | "desc";
         };
         BalanceLine: {
             /** @enum {string} */
@@ -755,9 +769,15 @@ export interface components {
             };
             status: string;
         };
+        /** @description List contract page (go-tangra specs/032-server-side-tables) */
         RequestPage: {
             items: components["schemas"]["Request"][];
             total: number;
+            page: number;
+            page_size: number;
+            sort: string;
+            /** @enum {string} */
+            order: "asc" | "desc";
         };
         Calendar: {
             people: components["schemas"]["Person"][];
@@ -808,8 +828,15 @@ export interface components {
             name: string;
             recurring?: boolean;
         };
+        /** @description List contract page (go-tangra specs/032-server-side-tables) */
         HolidayList: {
             items: components["schemas"]["Holiday"][];
+            total: number;
+            page: number;
+            page_size: number;
+            sort: string;
+            /** @enum {string} */
+            order: "asc" | "desc";
         };
         ImportResult: {
             created: number;
@@ -863,8 +890,11 @@ export interface components {
         csrf: string;
         id: string;
         userId: string;
+        /** @description 1-based page; beyond the last page returns the last page */
         page: number;
         pageSize: number;
+        /** @description sort direction; defaults to the sort field's default direction */
+        order: "asc" | "desc";
         year: number;
     };
     requestBodies: never;
@@ -969,6 +999,12 @@ export interface operations {
             query?: {
                 /** @description include inactive types (hr:read) */
                 all?: boolean;
+                /** @description 1-based page; beyond the last page returns the last page */
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                sort?: "sort_order" | "name";
+                /** @description sort direction; defaults to the sort field's default direction */
+                order?: components["parameters"]["order"];
             };
             header?: never;
             path?: never;
@@ -1260,8 +1296,12 @@ export interface operations {
     listAllowances: {
         parameters: {
             query?: {
+                /** @description 1-based page; beyond the last page returns the last page */
                 page?: components["parameters"]["page"];
                 page_size?: components["parameters"]["pageSize"];
+                sort?: "year" | "user" | "type" | "total" | "remaining";
+                /** @description sort direction; defaults to the sort field's default direction */
+                order?: components["parameters"]["order"];
                 year?: components["parameters"]["year"];
                 user?: string;
                 type?: string;
@@ -1469,8 +1509,12 @@ export interface operations {
     listRequests: {
         parameters: {
             query?: {
+                /** @description 1-based page; beyond the last page returns the last page */
                 page?: components["parameters"]["page"];
                 page_size?: components["parameters"]["pageSize"];
+                sort?: "start_date" | "end_date" | "status" | "days" | "created_at" | "user";
+                /** @description sort direction; defaults to the sort field's default direction */
+                order?: components["parameters"]["order"];
                 view?: "mine" | "review" | "all";
                 user?: string;
                 department?: string;
@@ -1892,6 +1936,12 @@ export interface operations {
         parameters: {
             query?: {
                 year?: components["parameters"]["year"];
+                /** @description 1-based page; beyond the last page returns the last page */
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                sort?: "date" | "name";
+                /** @description sort direction; defaults to the sort field's default direction */
+                order?: components["parameters"]["order"];
             };
             header?: never;
             path?: never;

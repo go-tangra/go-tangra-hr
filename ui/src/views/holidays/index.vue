@@ -4,8 +4,9 @@
 // "YYYY-MM-DD,name[,yearly]" lines can be imported (checked first).
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { UiAlert, UiButton, UiCard, UiCheckbox, UiDataTable, UiDialog, UiDrawer, UiInput, UiPage, UiSelect, UiTextarea, useConfirm, useToast, type Column, type SelectOption } from '@go-tangra/ui'
-import { api, describe, describeRefusal, postBytes, ApiError } from '@/api/client'
+import { api, describeRefusal, postBytes, ApiError } from '@/api/client'
 import type { Holiday, ImportResult } from '@/api/types'
+import { useServerList } from '@/composables/useServerList'
 import { useOrg } from '@/stores/org'
 import { date } from '@/utils/format'
 
@@ -14,19 +15,12 @@ const toast = useToast()
 const confirm = useConfirm()
 const thisYear = new Date().getFullYear()
 const year = ref(String(thisYear))
-const items = ref<Holiday[]>([])
-const error = ref('')
 const years = computed<SelectOption[]>(() => [-1, 0, 1, 2].map((d) => ({ title: String(thisYear + d), value: String(thisYear + d) })))
 
-async function load(): Promise<void> {
-  error.value = ''
-  try {
-    items.value = (await api<{ items: Holiday[] }>('GET', 'holidays', undefined, { query: { year: Number(year.value) } })).items ?? []
-  } catch (e) {
-    error.value = describe(e)
-  }
-}
-watch(year, load)
+// Server-paged (api/openapi/hr.yaml listHolidays): by date or name.
+const list = useServerList<Holiday>('holidays', 'holidays', { sortable: ['date', 'name'], defaultSort: { key: 'date', dir: 'asc' } }, () => ({ year: Number(year.value) }))
+const { lq, load } = list
+watch(year, () => list.search())
 onMounted(async () => {
   await org.load().catch(() => {})
   await load()
@@ -85,8 +79,8 @@ async function runImport(dry: boolean): Promise<void> {
 
 type Row = Holiday & Record<string, unknown>
 const columns: Column<Row>[] = [
-  { key: 'date', label: 'Date', format: (h) => date(h.date) },
-  { key: 'name', label: 'Name' },
+  { key: 'date', label: 'Date', format: (h) => date(h.date), sortable: true },
+  { key: 'name', label: 'Name', sortable: true },
   { key: 'recurring', label: 'Every year', width: 'sm', format: (h) => (h.recurring ? 'Yes' : 'No') },
 ]
 </script>
@@ -101,11 +95,13 @@ const columns: Column<Row>[] = [
       <UiCard>
         <UiSelect id="holiday-year" v-model="year" label="Year" :options="years" size="sm" data-test="holiday-year" />
       </UiCard>
-      <UiAlert v-if="error" kind="error">{{ error }}</UiAlert>
+      <UiAlert v-if="list.error.value" kind="error">{{ list.error.value }}</UiAlert>
       <UiCard :padded="false">
         <UiDataTable
-          :items="(items as Row[])" :columns="columns" caption="Holidays" empty-title="No holidays" :clickable="org.canManage"
+          :items="(list.items.value as Row[])" :total="list.total.value" :page="lq.page.value" :page-size="lq.pageSize.value" :sort="lq.sort.value"
+          :loading="list.loading.value" :columns="columns" caption="Holidays" empty-title="No holidays" :clickable="org.canManage"
           :row-attrs="(h) => ({ 'data-test': 'holiday-row-' + h.id })" data-test="holidays-table" @row-click="open($event)"
+          @update:page="lq.setPage" @update:page-size="lq.setPageSize" @update:sort="lq.setSort"
         >
           <template v-if="org.canManage" #actions="{ row }">
             <div class="flex justify-end" @click.stop>
