@@ -345,6 +345,10 @@ func TestListAndGet(t *testing.T) {
 	is(t, err, apperr.Validation, "view")
 	_, _, err = f.s.List(ctx, authz.User(tn, "cal", nil), ListFilter{})
 	is(t, err, apperr.Forbidden, "calendar viewer lists")
+	for _, v := range []string{"", ViewMine, ViewReview} {
+		_, _, err = f.s.List(ctx, authz.User(tn, "", nil), ListFilter{View: v})
+		is(t, err, apperr.Forbidden, "own/review views without a user id")
+	}
 
 	for _, who := range []authz.Subjects{maria, petar, ivan, hana, vera} {
 		if _, err := f.s.Get(ctx, who, r1.ID); err != nil {
