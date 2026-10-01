@@ -7,8 +7,11 @@ package repotest
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-tangra/go-tangra/v4/listquery"
 
 	"github.com/go-tangra/go-tangra-hr/v4/internal/leavedays"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/repo"
@@ -68,6 +71,7 @@ func Run(t *testing.T, mk func(*testing.T) repo.Store) {
 	t.Run("holidays", func(t *testing.T) { testHolidays(t, mk(t)) })
 	t.Run("tenants outcomes mail audit", func(t *testing.T) { testMisc(t, mk(t)) })
 	t.Run("tx rollback", func(t *testing.T) { testTx(t, mk(t)) })
+	t.Run("paged lists", func(t *testing.T) { testPagedLists(t, mk(t)) })
 }
 
 func must(t *testing.T, err error) {
@@ -186,7 +190,7 @@ func testAllowances(t *testing.T, s repo.Store) {
 	if err != nil || total != 2 || len(items) != 2 {
 		t.Fatalf("list by year: %d %v", total, err)
 	}
-	items, total, err = s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{Page: 1, PageSize: 1})
+	items, total, err = s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{List: listquery.Request{Page: 1, PageSize: 1}})
 	if err != nil || total != 3 || len(items) != 1 || items[0].Year != 2027 {
 		t.Fatalf("paged list (year desc): %+v %d %v", items, total, err)
 	}
@@ -198,9 +202,9 @@ func testAllowances(t *testing.T, s repo.Store) {
 	if len(items) != 1 || items[0].ID != pa.ID {
 		t.Fatal("pool filter")
 	}
-	items, _, _ = s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{AbsenceTypeID: ty.ID, Page: 9, PageSize: 10})
-	if len(items) != 0 {
-		t.Fatal("page past end")
+	items, total, _ = s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{AbsenceTypeID: ty.ID, List: listquery.Request{Page: 9, PageSize: 10}})
+	if len(items) != total || total == 0 {
+		t.Fatalf("page past end returns the last page: %d of %d", len(items), total)
 	}
 
 	must(t, s.Tx(ctx, TenantA, func(tx repo.Store) error {
@@ -321,7 +325,7 @@ func testRequests(t *testing.T, s repo.Store) {
 	if len(items) != 1 || items[0].UserID != "ivan" {
 		t.Fatal("approver + users filter")
 	}
-	items, total, _ = s.ListRequests(ctx, TenantA, repo.RequestFilter{Page: 2, PageSize: 2})
+	items, total, _ = s.ListRequests(ctx, TenantA, repo.RequestFilter{List: listquery.Request{Page: 2, PageSize: 2}})
 	if len(items) != 1 || total != 3 {
 		t.Fatal("paging")
 	}
@@ -515,4 +519,203 @@ func testTx(t *testing.T, s repo.Store) {
 		t.Fatal("committed row missing")
 	}
 	is(t, s.Tx(ctx, "", func(repo.Store) error { return nil }), repo.ErrNotFound, "tx without tenant")
+}
+
+// pageAll walks every page of a list (size 4) and fails unless each record
+// shows up exactly once, every page but the last is full and the walk visits
+// total records.
+func pageAll[T any](t *testing.T, what string, list func(listquery.Request) ([]T, int, error), id func(T) string, req listquery.Request) []T {
+	t.Helper()
+	req.PageSize = 4
+	seen := map[string]bool{}
+	var all []T
+	for req.Page = 1; ; req.Page++ {
+		items, total, err := list(req)
+		if err != nil {
+			t.Fatalf("%s page %d: %v", what, req.Page, err)
+		}
+		for _, it := range items {
+			if seen[id(it)] {
+				t.Fatalf("%s: %s seen twice", what, id(it))
+			}
+			seen[id(it)] = true
+		}
+		all = append(all, items...)
+		if req.Page*req.PageSize >= total {
+			if len(all) != total {
+				t.Fatalf("%s: visited %d of %d", what, len(all), total)
+			}
+			return all
+		}
+		if len(items) != req.PageSize {
+			t.Fatalf("%s page %d: %d items", what, req.Page, len(items))
+		}
+	}
+}
+
+// ordered fails unless keys follow dir (nil keys last in both directions).
+func ordered(t *testing.T, what string, dir listquery.Dir, keys []any) {
+	t.Helper()
+	for i := 1; i < len(keys); i++ {
+		a, b := keys[i-1], keys[i]
+		if b == nil {
+			continue
+		}
+		if a == nil {
+			t.Fatalf("%s: nil before %v at %d", what, b, i)
+		}
+		c := compareKey(a, b)
+		if (dir == listquery.Asc && c > 0) || (dir == listquery.Desc && c < 0) {
+			t.Fatalf("%s: %v then %v at %d", what, a, b, i)
+		}
+	}
+}
+
+func compareKey(a, b any) int {
+	switch x := a.(type) {
+	case string:
+		y := b.(string)
+		x, y = strings.ToLower(x), strings.ToLower(y)
+		return strings.Compare(x, y)
+	case int64:
+		y := b.(int64)
+		return int(min(max(x-y, -1), 1))
+	case time.Time:
+		return x.Compare(b.(time.Time))
+	}
+	return 0
+}
+
+// testPagedLists pins the list contract (go-tangra specs/032): every sort
+// field in both directions pages each record exactly once, in order, the
+// member-name sort included (people without a name last); totals count one
+// tenant; a page past the end is the last page; All lists are unchanged.
+func testPagedLists(t *testing.T, s repo.Store) {
+	n := now()
+	names := map[string]string{"u1": "Charlie", "u2": "alpha", "u3": "Bravo", "u4": ""}
+	users := []string{"u1", "u2", "u3", "u4"}
+	for _, u := range users {
+		must(t, s.UpsertMember(ctx, store.Member{TenantID: TenantA, UserID: u, DisplayName: names[u], Active: true, SyncedAt: n}))
+	}
+	tyA, tyB := Type(TenantA, "annual"), Type(TenantA, "Bonus")
+	pool := Pool(TenantA, "common")
+	must(t, s.CreatePool(ctx, pool))
+	must(t, s.CreateAbsenceType(ctx, tyA))
+	must(t, s.CreateAbsenceType(ctx, tyB))
+	statuses := []string{store.StatusPending, store.StatusApproved, store.StatusRejected}
+	for ui, u := range users {
+		for j := range 6 {
+			start := Date(2026, 1, 1+j*3)
+			r := Request(TenantA, u, tyA.ID, start, start.AddDate(0, 0, 1))
+			r.Days = leavedays.Tenths(10 * (1 + (j+ui)%3))
+			r.Status = statuses[j%3]
+			r.CreatedAt = n.Add(time.Duration(j%2) * time.Second)
+			must(t, s.CreateRequest(ctx, r))
+		}
+		for yi, year := range []int{2025, 2026} {
+			for k, target := range []struct{ ty, pool string }{{tyA.ID, ""}, {tyB.ID, ""}, {"", pool.ID}} {
+				a := Allowance(TenantA, u, year, target.ty, target.pool, leavedays.Tenths(100+10*((ui+k)%3)))
+				a.Carried = leavedays.Tenths(10 * yi)
+				must(t, s.CreateAllowance(ctx, a))
+			}
+		}
+	}
+	// Another tenant's rows never count.
+	tyX := Type(TenantB, "other")
+	must(t, s.CreateAbsenceType(ctx, tyX))
+	must(t, s.CreateRequest(ctx, Request(TenantB, "u1", tyX.ID, Date(2026, 1, 1), Date(2026, 1, 2))))
+	must(t, s.CreateAllowance(ctx, Allowance(TenantB, "u1", 2026, tyX.ID, "", 100)))
+
+	typeName := map[string]string{tyA.ID: tyA.Name, tyB.ID: tyB.Name, pool.ID: pool.Name}
+	name := func(u string) any {
+		if names[u] == "" {
+			return nil
+		}
+		return names[u]
+	}
+	reqKey := map[string]func(store.Request) any{
+		"start_date": func(r store.Request) any { return r.Start },
+		"end_date":   func(r store.Request) any { return r.End },
+		"status":     func(r store.Request) any { return r.Status },
+		"days":       func(r store.Request) any { return int64(r.Days) },
+		"created_at": func(r store.Request) any { return r.CreatedAt },
+		"user":       func(r store.Request) any { return name(r.UserID) },
+	}
+	allowKey := map[string]func(store.Allowance) any{
+		"year":      func(a store.Allowance) any { return int64(a.Year) },
+		"user":      func(a store.Allowance) any { return name(a.UserID) },
+		"type":      func(a store.Allowance) any { return typeName[a.AbsenceTypeID+a.PoolID] },
+		"total":     func(a store.Allowance) any { return int64(a.Total) },
+		"remaining": func(a store.Allowance) any { return int64(a.Remaining()) },
+	}
+	if len(reqKey) != len(store.RequestList.Fields) || len(allowKey) != len(store.AllowanceList.Fields) {
+		t.Fatal("every sort field must be covered")
+	}
+	for _, dir := range []listquery.Dir{listquery.Asc, listquery.Desc} {
+		for field, key := range reqKey {
+			what := "requests " + field + " " + string(dir)
+			got := pageAll(t, what, func(req listquery.Request) ([]store.Request, int, error) {
+				return s.ListRequests(ctx, TenantA, repo.RequestFilter{List: req})
+			}, func(r store.Request) string { return r.ID }, listquery.Request{Sort: field, Order: dir})
+			if len(got) != 24 {
+				t.Fatalf("%s: total %d", what, len(got))
+			}
+			keys := make([]any, len(got))
+			for i, r := range got {
+				keys[i] = key(r)
+			}
+			ordered(t, what, dir, keys)
+		}
+		for field, key := range allowKey {
+			what := "allowances " + field + " " + string(dir)
+			got := pageAll(t, what, func(req listquery.Request) ([]store.Allowance, int, error) {
+				return s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{List: req})
+			}, func(a store.Allowance) string { return a.ID }, listquery.Request{Sort: field, Order: dir})
+			if len(got) != 24 {
+				t.Fatalf("%s: total %d", what, len(got))
+			}
+			keys := make([]any, len(got))
+			for i, a := range got {
+				keys[i] = key(a)
+			}
+			ordered(t, what, dir, keys)
+		}
+	}
+	// Filters narrow the total; a page past the end is the last page.
+	items, total, err := s.ListRequests(ctx, TenantA, repo.RequestFilter{UserID: "u2", List: listquery.Request{Page: 99, PageSize: 4, Sort: "user"}})
+	if err != nil || total != 6 || len(items) != 2 {
+		t.Fatalf("filtered past-the-end page: %d of %d %v", len(items), total, err)
+	}
+	items2, total, err := s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{Year: 2026, List: listquery.Request{Sort: "type", Order: listquery.Asc}})
+	if err != nil || total != 12 || len(items2) != 12 || typeName[items2[0].AbsenceTypeID+items2[0].PoolID] != "annual" {
+		t.Fatalf("filtered allowances: %d %v", total, err)
+	}
+	// The zero request is the default first page (start date desc).
+	items, total, _ = s.ListRequests(ctx, TenantA, repo.RequestFilter{})
+	if total != 24 || len(items) != min(24, listquery.DefaultPageSize) || !items[0].Start.Equal(Date(2026, 1, 16)) {
+		t.Fatalf("default page: %d %d", total, len(items))
+	}
+	// All callers keep the whole list in the old order.
+	all, total, _ := s.ListRequests(ctx, TenantA, repo.RequestFilter{All: true})
+	if total != 24 || len(all) != 24 {
+		t.Fatalf("all requests: %d %d", total, len(all))
+	}
+	for i := 1; i < len(all); i++ {
+		if a, b := all[i-1], all[i]; a.Start.Before(b.Start) || (a.Start.Equal(b.Start) && a.ID < b.ID) {
+			t.Fatalf("all requests order at %d", i)
+		}
+	}
+	allA, total, _ := s.ListAllowances(ctx, TenantA, repo.AllowanceFilter{All: true})
+	if total != 24 || len(allA) != 24 {
+		t.Fatalf("all allowances: %d %d", total, len(allA))
+	}
+	for i := 1; i < len(allA); i++ {
+		a, b := allA[i-1], allA[i]
+		if a.Year < b.Year || (a.Year == b.Year && (a.UserID > b.UserID || (a.UserID == b.UserID && a.ID > b.ID))) {
+			t.Fatalf("all allowances order at %d", i)
+		}
+	}
+	if _, total, _ := s.ListRequests(ctx, TenantB, repo.RequestFilter{}); total != 1 {
+		t.Fatalf("tenant B total %d", total)
+	}
 }

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-hr/v4/internal/apperr"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/authz"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/leavedays"
@@ -28,8 +30,7 @@ type ListFilter struct {
 	AbsenceTypeID string
 	Status        string
 	From, To      *time.Time
-	Page          int
-	PageSize      int
+	List          listquery.Request // page, size and sort (store.RequestList)
 }
 
 // Get returns a request's details (SR-004).
@@ -43,7 +44,7 @@ func (s *Service) List(ctx context.Context, subj authz.Subjects, f ListFilter) (
 	if err := s.require(ctx, subj, authz.Request); err != nil && !authz.Allowed(ctx, s.d.Checker, subj, authz.Read) {
 		return nil, 0, err
 	}
-	rf := repo.RequestFilter{AbsenceTypeID: f.AbsenceTypeID, From: f.From, To: f.To, Page: f.Page, PageSize: f.PageSize}
+	rf := repo.RequestFilter{AbsenceTypeID: f.AbsenceTypeID, From: f.From, To: f.To, List: f.List}
 	if f.Status != "" {
 		rf.Statuses = []string{f.Status}
 	}

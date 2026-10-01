@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-hr/v4/internal/leavedays"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/store"
@@ -582,29 +584,49 @@ func (m *Mem) ListAllowances(_ context.Context, tenantID string, f repo.Allowanc
 		}
 		out = append(out, a)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Year != out[j].Year {
-			return out[i].Year > out[j].Year
+	if f.All {
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].Year != out[j].Year {
+				return out[i].Year > out[j].Year
+			}
+			if out[i].UserID != out[j].UserID {
+				return out[i].UserID < out[j].UserID
+			}
+			return out[i].ID < out[j].ID
+		})
+		return out, len(out), nil
+	}
+	req := store.ListOrDefault(f.List, store.AllowanceList)
+	listquery.SortSlice(out, req, func(a store.Allowance, field string) any {
+		switch field {
+		case "user":
+			return m.memberName(tenantID, a.UserID)
+		case "type":
+			if t, ok := m.d.types[a.AbsenceTypeID]; ok && a.AbsenceTypeID != "" {
+				return t.Name
+			}
+			if p, ok := m.d.pools[a.PoolID]; ok && a.PoolID != "" {
+				return p.Name
+			}
+			return nil
+		case "total":
+			return int64(a.Total)
+		case "remaining":
+			return int64(a.Remaining())
 		}
-		if out[i].UserID != out[j].UserID {
-			return out[i].UserID < out[j].UserID
-		}
-		return out[i].ID < out[j].ID
-	})
-	return paginate(out, f.All, f.Page, f.PageSize)
+		return a.Year
+	}, func(a store.Allowance) string { return a.ID })
+	page, total, _ := listquery.Window(out, req)
+	return page, total, nil
 }
 
-func paginate[T any](all []T, noPaging bool, page, size int) ([]T, int, error) {
-	total := len(all)
-	if noPaging {
-		return all, total, nil
+// memberName is the member's display name, nil when unknown or empty (sorts
+// last, like NULLIF(m.display_name, ”) in SQL).
+func (m *Mem) memberName(tenantID, userID string) any {
+	if mb, ok := m.d.members[key(tenantID, userID)]; ok && mb.DisplayName != "" {
+		return mb.DisplayName
 	}
-	p, s := store.Page(page, size, 500)
-	start := (p - 1) * s
-	if start >= total {
-		return nil, total, nil
-	}
-	return all[start:min(start+s, total)], total, nil
+	return nil
 }
 
 // FindAllowance implements repo.Store.
@@ -844,13 +866,33 @@ func (m *Mem) ListRequests(_ context.Context, tenantID string, f repo.RequestFil
 		}
 		out = append(out, cloneRequest(r))
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].Start.Equal(out[j].Start) {
-			return out[i].Start.After(out[j].Start)
+	if f.All {
+		sort.Slice(out, func(i, j int) bool {
+			if !out[i].Start.Equal(out[j].Start) {
+				return out[i].Start.After(out[j].Start)
+			}
+			return out[i].ID > out[j].ID
+		})
+		return out, len(out), nil
+	}
+	req := store.ListOrDefault(f.List, store.RequestList)
+	listquery.SortSlice(out, req, func(r store.Request, field string) any {
+		switch field {
+		case "end_date":
+			return r.End
+		case "status":
+			return r.Status
+		case "days":
+			return int64(r.Days)
+		case "created_at":
+			return r.CreatedAt
+		case "user":
+			return m.memberName(tenantID, r.UserID)
 		}
-		return out[i].ID > out[j].ID
-	})
-	return paginate(out, f.All, f.Page, f.PageSize)
+		return r.Start
+	}, func(r store.Request) string { return r.ID })
+	page, total, _ := listquery.Window(out, req)
+	return page, total, nil
 }
 
 // Overlaps implements repo.Store.

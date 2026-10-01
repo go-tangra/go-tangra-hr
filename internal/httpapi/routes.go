@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-hr/v4/internal/allowances"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/apperr"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/authz"
@@ -155,16 +157,16 @@ func (b holidayBody) input() (catalog.HolidayInput, error) {
 func (h *handlers) registerCatalog() {
 	s, c := h.s, h.d.Catalog
 	s.withSubject("GET", Prefix+"/absence-types", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
+		req, ok := parseList(w, r, store.AbsenceTypeList)
+		if !ok {
+			return
+		}
 		list, err := c.ListTypes(r.Context(), subj, queryBool(r, "all"))
 		if err != nil {
 			s.fail(w, r, err)
 			return
 		}
-		out := make([]absenceTypeView, 0, len(list))
-		for _, t := range list {
-			out = append(out, viewType(t))
-		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+		WriteJSON(w, http.StatusOK, pageTypes(list, req))
 	})
 	s.withSubject("POST", Prefix+"/absence-types", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
 		var b typeBody
@@ -334,16 +336,16 @@ func (h *handlers) registerCatalog() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	s.withSubject("GET", Prefix+"/holidays", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
+		req, ok := parseList(w, r, store.HolidayList)
+		if !ok {
+			return
+		}
 		list, err := c.ListHolidays(r.Context(), subj, queryInt(r, "year"))
 		if err != nil {
 			s.fail(w, r, err)
 			return
 		}
-		out := make([]holidayView, 0, len(list))
-		for _, x := range list {
-			out = append(out, viewHoliday(x))
-		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+		WriteJSON(w, http.StatusOK, pageHolidays(list, req))
 	})
 	s.withSubject("POST", Prefix+"/holidays", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
 		var b holidayBody
@@ -457,9 +459,13 @@ func viewPlan(p allowances.CarryPlan) map[string]any {
 func (h *handlers) registerAllowances() {
 	s, a := h.s, h.d.Allowances
 	s.withSubject("GET", Prefix+"/allowances", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
+		req, ok := parseList(w, r, store.AllowanceList)
+		if !ok {
+			return
+		}
 		q := r.URL.Query()
 		list, total, err := a.List(r.Context(), subj, allowances.Filter{UserID: q.Get("user"), Year: queryInt(r, "year"),
-			AbsenceTypeID: q.Get("type"), PoolID: q.Get("pool"), Page: queryInt(r, "page"), PageSize: queryInt(r, "page_size")})
+			AbsenceTypeID: q.Get("type"), PoolID: q.Get("pool"), List: req})
 		if err != nil {
 			s.fail(w, r, err)
 			return
@@ -468,7 +474,7 @@ func (h *handlers) registerAllowances() {
 		for _, x := range list {
 			out = append(out, viewAllowance(x))
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": total})
+		WriteJSON(w, http.StatusOK, listquery.NewPage(out, total, req.Clamp(total)))
 	})
 	s.withSubject("POST", Prefix+"/allowances", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
 		var b allowanceBody
@@ -720,6 +726,10 @@ func (h *handlers) writeRequest(w http.ResponseWriter, r *http.Request, subj aut
 func (h *handlers) registerRequests() {
 	s, rq := h.s, h.d.Requests
 	s.withSubject("GET", Prefix+"/requests", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
+		req, ok := parseList(w, r, store.RequestList)
+		if !ok {
+			return
+		}
 		q := r.URL.Query()
 		from, err := queryDate(r, "from")
 		if err != nil {
@@ -733,7 +743,7 @@ func (h *handlers) registerRequests() {
 		}
 		list, total, err := rq.List(r.Context(), subj, requests.ListFilter{View: q.Get("view"), UserID: q.Get("user"),
 			DepartmentID: q.Get("department"), AbsenceTypeID: q.Get("type"), Status: q.Get("status"), From: from, To: to,
-			Page: queryInt(r, "page"), PageSize: queryInt(r, "page_size")})
+			List: req})
 		if err != nil {
 			s.fail(w, r, err)
 			return
@@ -743,7 +753,7 @@ func (h *handlers) registerRequests() {
 			s.fail(w, r, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+		WriteJSON(w, http.StatusOK, listquery.NewPage(items, total, req.Clamp(total)))
 	})
 	s.withSubject("POST", Prefix+"/requests", func(w http.ResponseWriter, r *http.Request, subj authz.Subjects) {
 		var b requestBody
@@ -985,7 +995,7 @@ func (h *handlers) registerStats() {
 		out := map[string]any{"absence_types": len(types)}
 		for key, status := range map[string]string{"pending": store.StatusPending, "awaiting_signing": store.StatusAwaitingSigning,
 			"approved": store.StatusApproved, "rejected": store.StatusRejected} {
-			_, n, err := h.d.Store.ListRequests(ctx, t, repo.RequestFilter{Statuses: []string{status}, PageSize: 1})
+			_, n, err := h.d.Store.ListRequests(ctx, t, repo.RequestFilter{Statuses: []string{status}, List: listquery.Request{Page: 1, PageSize: 1}})
 			if err != nil {
 				s.fail(w, r, err)
 				return
