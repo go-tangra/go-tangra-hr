@@ -76,8 +76,8 @@ github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0 h1:KjAVJn8jAZbcIyL6B3yasngtFTxw
 github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0/go.mod h1:j/24DHoyBPfYcHzehJKkQLL/s1jDPToGr/LqV/qA/HM=
 github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0 h1:/3FczTz9n8Pq1vcOU6rWuXcyvixIaXV/TSsBpciKIi0=
 github.com/go-tangra/go-tangra-notification/sdk/v4 v4.2.0/go.mod h1:y729N1SBDGRzRjuRW7Te6BTfg1J7e/XDEutrEQ5DxBU=
-github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0 h1:THNjBM31OknVg0TJey5EuntROMaCY1ndozbN5ZBlLlg=
-github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0/go.mod h1:SKP6ZWoKPtYo7IZboDjGZW3rbGnKtSBr7I24EoLT2Bk=
+github.com/go-tangra/go-tangra-portal/sdk/v4 v4.1.0 h1:vER2dKZi79h1Q4AvLyLmrcJ47vAa6jY5AlvUl+kXIiw=
+github.com/go-tangra/go-tangra-portal/sdk/v4 v4.1.0/go.mod h1:SKP6ZWoKPtYo7IZboDjGZW3rbGnKtSBr7I24EoLT2Bk=
 github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0 h1:bbBnhjuw+6iJgSwc+4+DooLu0ES1XNTSLBpaYyav+us=
 github.com/go-tangra/go-tangra-scheduler/sdk/v4 v4.0.0/go.mod h1:9rdsSKJ8nNRf6OrrtzSVoVmPIfaRrjTWge0OKe5ne3U=
 github.com/go-tangra/go-tangra-signing/sdk/v4 v4.0.0 h1:eOAdG4hJbPrk0itpMM7W9029skpA+Fay87HVSxwF24c=
