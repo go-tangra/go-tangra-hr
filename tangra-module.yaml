@@ -1,0 +1,40 @@
+# How hr describes itself to the gateway's module catalogue (spec 035).
+# Each v* release publishes catalogue-entry.json and bundle.zip built from
+# this file and deploy/bundle/ (see .github/workflows/ci.yaml, job catalogue).
+schema: 1
+module: hr
+display_name: HR
+category: People
+summary: Leave management - absence types, allowances with carry-over, approvals, signed leave forms and a team calendar.
+image: ghcr.io/go-tangra/go-tangra-hr
+routes:
+  prefixes: [/api/hr, /m/hr, /hr]
+  names: [hr]
+min_core: { gateway: 4.9.0, auth: 4.10.0 }
+bundle:
+  dir: deploy/bundle
+  templates: [config.yaml, policy.yaml]
+  tls_hosts: [hr-db]
+host_inputs:
+  - key: MODULE_ADVERTISE_HOST
+    label: Host name the core uses to reach this module
+    pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'
+  - key: MODULE_BIND_IP
+    label: IP address the module's mesh ports listen on (reachable from the core)
+    pattern: '^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$'
+  - key: HR_VALKEY_ADDRESS
+    label: The core's Valkey event bus, TLS (host:port)
+    pattern: '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?:[0-9]{1,5}$'
+  - key: HR_VALKEY_PASSWORD
+    label: Password of the Valkey user hr
+    pattern: '^[A-Za-z0-9._~+/=-]{16,256}$'
+  - key: HR_NOTIFICATION_GRPC
+    label: Notification module mesh address (host:port, reachable from this host)
+    pattern: '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?:[0-9]{1,5}$'
+  - key: HR_SIGNING_GRPC
+    label: Signing module mesh address (host:port, reachable from this host)
+    pattern: '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?:[0-9]{1,5}$'
+  - key: HR_SCHEDULER_GRPC
+    label: Scheduler module mesh address (host:port, reachable from this host)
+    pattern: '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?:[0-9]{1,5}$'
+docs: https://github.com/go-tangra/go-tangra-hr#readme

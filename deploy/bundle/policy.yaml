@@ -1,0 +1,15 @@
+# Freya service-to-service policy for hr (rendered for this core's trust
+# domain): deny by default; the gateway forwards browser traffic and only the
+# scheduler executes hr's task types.
+version: hr-join-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://${TRUST_DOMAIN}/svc/gateway"]
+    to: ["hr"]
+    operations: ["*"]
+    effect: allow
+  - id: scheduler-execute
+    from: ["spiffe://${TRUST_DOMAIN}/svc/scheduler"]
+    to: ["hr"]
+    operations: ["/scheduler.v1.TaskExecutor/ExecuteTask"]
+    effect: allow

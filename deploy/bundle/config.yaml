@@ -1,0 +1,58 @@
+# hr configuration, rendered by the gateway's add-module wizard: every ${...}
+# below was filled from the core's own configuration or the inputs given in
+# the wizard, so the issuer, trust domain and addresses match the core.
+service_name: hr
+trust_domain: ${TRUST_DOMAIN}
+env: production
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: ${LCM_ENROLL_URL}
+  lcm_grpc: ${LCM_GRPC}
+  tenant_id: ${MESH_TENANT_ID}
+  token_file: /tokens/enrollment.token
+  state_file: /home/app/svid.json
+authz: { source: file, path: /app/deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9925, http_addr: 0.0.0.0:9926 }
+admin: { addr: 127.0.0.1:9870 }
+discovery:
+  static:
+    gateway: ["${GATEWAY_GRPC}"]
+    auth: ["${AUTH_GRPC}"]
+    notification: ["${HR_NOTIFICATION_GRPC}"]
+    scheduler: ["${HR_SCHEDULER_GRPC}"]
+    signing: ["${HR_SIGNING_GRPC}"]
+# Backup imports carry archives of up to 256 MiB.
+limits: { max_request_bytes: 268435456 }
+db:
+  dsn: postgres://hr_app:${GEN_PASSWORD_2}@hr-db:5432/hr?sslmode=verify-full&sslrootcert=/tls/ca.pem
+  migrate_dsn: postgres://postgres:${GEN_PASSWORD_1}@hr-db:5432/hr?sslmode=verify-full&sslrootcert=/tls/ca.pem
+  max_conns: 16
+# The core's platform event bus: hr follows signing outcomes on it and
+# publishes hr.* events for the UI. private/valkey-ca.pem is the CA of the
+# core Valkey's TLS certificate (copied there by the operator).
+valkey:
+  addresses: ["${HR_VALKEY_ADDRESS}"]
+  username: hr
+  password: "${HR_VALKEY_PASSWORD}"
+  ca_file: /tls/valkey-ca.pem
+events: { enabled: true }
+platform_tenant_id: ${MESH_TENANT_ID}
+auth: { service: auth }
+notification: { service: notification }
+signing: { service: signing }
+task_scheduler: { enabled: true, service: scheduler }
+links: { portal_base_url: ${GATEWAY_ISSUER} }
+gateway: { service: gateway, issuer: ${GATEWAY_ISSUER} }
+limits_hr:
+  max_page_size: 100
+  max_calendar_days: 93
+  max_request_days: 366
+  max_import_bytes: 65536
+  max_import_lines: 500
+  max_backup_bytes: 268435456
+  max_department_depth: 10
+consumer: { enabled: true, block_ms: 2000, batch: 100, tenants_refresh_seconds: 30 }
+reconcile: { older_than_minutes: 10 }
+outbox: { interval_ms: 2000, batch: 50, max_attempts: 5 }
