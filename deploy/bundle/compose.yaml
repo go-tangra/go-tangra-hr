@@ -1,0 +1,56 @@
+# hr join bundle, rendered by the gateway's add-module wizard.
+#   docker compose up -d
+# Values come from .env (written by the gateway: core addresses, generated
+# passwords, and the host inputs you gave). private/ holds the single-use
+# enrolment token, the mesh CA and this bundle's own TLS material; copy the
+# core Valkey's TLS CA to private/valkey-ca.pem before the first start.
+name: tangra-hr
+services:
+  hr-db:
+    image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hr
+      POSTGRES_PASSWORD: ${GEN_PASSWORD_1}
+      HR_APP_PASSWORD: ${GEN_PASSWORD_2}
+    # The server key must belong to the postgres user: copy it before start.
+    entrypoint: ["sh", "-c", "install -d -o postgres -m 0700 /tls-pg && install -o postgres -m 0600 /tls/hr-db.key /tls-pg/server.key && install -o postgres -m 0644 /tls/hr-db.crt /tls-pg/server.crt && exec docker-entrypoint.sh \"$$@\"", "--"]
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/tls-pg/server.crt", "-c", "ssl_key_file=/tls-pg/server.key"]
+    volumes:
+      - hr-db:/var/lib/postgresql/data
+      - ./private/tls:/tls:ro
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hr"]
+      interval: 5s
+      retries: 30
+  hr:
+    image: ${MODULE_IMAGE}:${MODULE_VERSION}
+    restart: unless-stopped
+    # Applies the migrations, then serves.
+    command: ["-config", "/app/deploy/config.yaml"]
+    environment:
+      FREYA_ADVERTISE_HOST: ${MODULE_ADVERTISE_HOST}
+    ports:
+      - "${MODULE_BIND_IP}:9925:9925"
+      - "${MODULE_BIND_IP}:9926:9926"
+    volumes:
+      - ./config.yaml:/app/deploy/config.yaml:ro
+      - ./policy.yaml:/app/deploy/policy.yaml:ro
+      - ./private/enrollment.token:/tokens/enrollment.token:ro
+      - ./private/tls/ca.pem:/tls/ca.pem:ro
+      - ./private/valkey-ca.pem:/tls/valkey-ca.pem:ro
+      # The image's home of user app (uid 10001): a fresh volume takes its
+      # ownership, so the SVID state is writable without running as root.
+      - hr-state:/home/app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9870/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      hr-db: { condition: service_healthy }
+volumes:
+  hr-db: {}
+  hr-state: {}
