@@ -18,12 +18,14 @@ import (
 
 	"github.com/go-tangra/go-tangra-lcm/sdk/v4/pkg/lcmidentity"
 	"github.com/go-tangra/go-tangra/v4"
+	"github.com/go-tangra/go-tangra/v4/helpdocs"
 	"google.golang.org/grpc"
 
 	authv1 "github.com/go-tangra/go-tangra-auth/sdk/v4/api/proto/auth/v1"
 	"github.com/go-tangra/go-tangra-auth/sdk/v4/pkg/authclient"
 	"github.com/go-tangra/go-tangra-portal/sdk/v4/pkg/gatewayclient"
 
+	"github.com/go-tangra/go-tangra-hr/v4/docs"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/allowances"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/audit"
 	"github.com/go-tangra/go-tangra-hr/v4/internal/authz"
@@ -77,6 +79,7 @@ type App struct {
 	Events   events.Emitter
 	HTTP     *httpapi.Server
 	Now      func() time.Time
+	Docs     *helpdocs.Bundle // embedded help pages, served to the gateway
 
 	Directory   people.Directory
 	People      *people.Cache
@@ -104,6 +107,10 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		handler = slog.NewJSONHandler(os.Stderr, nil)
 	}
 	a.Log = slog.New(handler)
+	// The help pages are built in; a broken tree refuses to start (CI lints it).
+	if a.Docs, err = helpdocs.Load(docs.Help(), hrmanifest.Module); err != nil {
+		return nil, fmt.Errorf("help docs: %w", err)
+	}
 	built := a
 	defer func() { // release what was opened when wiring fails half-way
 		if err != nil {
@@ -141,6 +148,8 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	a.HTTP.Register(httpapi.Deps{Hub: a.Hub, Health: a.health, Store: a.Repo, Checker: a.Checker, Tree: a.Departments.Tree, People: a.People,
 		Catalog: a.Catalog, Allowances: a.Allowances, Departments: a.Departments, Requests: a.Requests, Signing: a.Signing, Backup: a.Backup,
 		MaxBackup: l.MaxBackupBytes, MaxImport: l.MaxImportBytes, MaxPageSize: l.MaxPageSize, Now: a.Now})
+	// Help pages for the gateway only; registered before the "/" catch-all.
+	a.Freya.HTTP().Handle(helpdocs.BundlePath, helpdocs.NewHandler(a.Docs, helpdocs.AllowServices(cfg.Gateway.Service)))
 	a.Freya.HTTP().HandlePrefix("/", a.HTTP.Handler())
 	return a, nil
 }
@@ -389,6 +398,7 @@ func (a *App) register(ctx context.Context) {
 			continue
 		}
 		client, err = gatewayclient.New(conn, gatewayclient.Options{Manifest: man, HTTPURL: "https://" + httpEP.Host, GRPCTarget: grpcEP.Host, Logger: a.Log,
+			DocsDigest: a.Docs.Digest, // the gateway fetches the help bundle when it changes
 			OnState: func(s gatewayclient.State) {
 				a.Log.Info("gateway lease", "registered", s.Registered, "lease", s.LeaseID, "err", s.Err)
 			}})
